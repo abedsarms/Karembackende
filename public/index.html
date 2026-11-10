@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <title>CAReM - Earn with Telegram Stars</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+    <script src="/i18n.js" defer></script>
+    <script src="/bg.js" defer></script>
+    <script src="/app.js" defer></script>
+</head>
+<body class="loading">
+    <canvas id="galaxy" aria-hidden="true"></canvas>
+
+    <!-- Loading screen (hidden after the first successful server response) -->
+    <div id="loadingScreen" role="status" aria-live="polite">
+        <div class="loader-logo-wrapper">
+            <h1 class="loader-logo">CA<span class="r-wrapper">R<span class="loader-crown-star" aria-hidden="true">⭐</span></span>eM</h1>
+        </div>
+        <div class="gear-stars-container" aria-hidden="true">
+            <span class="gear-star left"></span>
+            <span class="gear-star center"></span>
+            <span class="gear-star right"></span>
+        </div>
+        <div class="loading-text">Loading information...<br>در حال بارگذاری اطلاعات...</div>
+    </div>
+
+    <!-- Shown when opened outside Telegram / server unreachable -->
+    <div id="noticeScreen" class="notice-screen hidden" role="alert"></div>
+
+    <div class="container">
+        <header class="profile-header">
+            <div class="header-left">
+                <button type="button" class="settings-btn" id="settingsBtn" data-i18n-aria="settingsTitle" aria-label="Language" aria-haspopup="dialog">🌐</button>
+                <div class="brand-logo">
+                    <h1 class="brand-text">CA<span class="r-wrapper">R<span class="crown-star" aria-hidden="true">⭐</span></span>eM</h1>
+                </div>
+            </div>
+            <div class="balance-badge" aria-live="polite">
+                <span aria-hidden="true">⭐</span>
+                <span id="userBalance">0</span>
+            </div>
+        </header>
+
+        <!-- Home -->
+        <main id="tab-home" class="tab-content active">
+            <div class="card card-daily">
+                <div class="channel-info">
+                    <span class="channel-name" data-i18n="dailyTitle">🎁 Daily Login Reward</span>
+                    <span class="reward-badge" id="dailyRewardBadge">⭐ 0.2</span>
+                </div>
+                <p class="hint" data-i18n="dailyDesc">Claim your free reward every 24 hours!</p>
+                <button type="button" id="dailyBtn" class="btn-green" data-i18n="dailyBtn">Claim Daily Reward</button>
+                <div class="channel-status-msg" id="dailyStatus" role="status" aria-live="polite"></div>
+            </div>
+
+            <div class="home-sections-toggle">
+                <button type="button" class="section-toggle-btn active" data-sec="ads" data-i18n="tabAds">📢 Ads</button>
+                <button type="button" class="section-toggle-btn" data-sec="sub" data-i18n="tabSub">🔔 Subscribe</button>
+            </div>
+
+            <div id="home-sec-ads" class="home-sub-section active"></div>
+            <div id="home-sec-sub" class="home-sub-section"></div>
+
+            <div id="authSection">
+                <h3 class="err mt0" data-i18n="capTitle">🔐 Security Verification</h3>
+                <p class="hint" data-i18n="capDesc">Enter the code from the image to continue:</p>
+                <p class="hint ok" id="capRewardText"></p>
+                <img id="captchaImg" class="captcha-img" alt="captcha" width="170" height="56">
+                <input type="text" id="captchaInput" placeholder="-----" maxlength="6" autocomplete="off" autocapitalize="characters" inputmode="text" aria-label="captcha">
+                <button type="button" id="captchaBtn" class="btn-red" data-i18n="capBtn">Verify & Continue</button>
+                <div class="channel-status-msg err" id="captchaMsg" role="status"></div>
+            </div>
+        </main>
+
+        <!-- Referral -->
+        <section id="tab-ref" class="tab-content">
+            <div class="card center">
+                <h3 data-i18n="refTitle">Invite Friends 🎁</h3>
+                <p class="hint rich" id="refDesc"></p>
+                <div class="stat-box" id="refCountText"></div>
+                <input type="text" id="refLinkInput" class="link-input" readonly aria-label="invite link">
+                <button type="button" id="copyBtn" class="btn-green" data-i18n="copyBtn">Copy Invite Link</button>
+                <p id="refStatus" class="ok small-msg" role="status"></p>
+            </div>
+        </section>
+
+        <!-- League -->
+        <section id="tab-league" class="tab-content">
+            <div class="card">
+                <h3 class="center warn mt0" data-i18n="leagueTitle">🏆 Weekly Leaderboard</h3>
+                <p class="hint center" data-i18n="leagueDesc">Top three users get rewards every 7 days!</p>
+                <p class="hint center mt0" data-i18n="leagueEnds">⏳ Weekly league ends in:</p>
+                <div class="countdown" id="leagueTimer" role="timer" aria-live="off">
+                    <div><b id="cdD">0</b><span data-i18n="days">Days</span></div>
+                    <div><b id="cdH">0</b><span data-i18n="hours">Hours</span></div>
+                    <div><b id="cdM">0</b><span data-i18n="minutes">Minutes</span></div>
+                </div>
+                <div class="stat-box center">
+                    <span data-i18n="yourRank">Your rank:</span> <strong id="userRank">—</strong>
+                    · <span data-i18n="yourScore">Score:</span> <strong id="userScore">0</strong>
+                </div>
+                <div class="leaderboard-list" id="leagueList"></div>
+            </div>
+        </section>
+
+        <!-- Wheel -->
+        <section id="tab-wheel" class="tab-content">
+            <div class="card wheel-container">
+                <h3 class="warn mt0" data-i18n="wheelTitle">🎡 Lucky ⭐ Wheel</h3>
+                <p class="hint" id="wheelDesc"></p>
+                <div class="progress" aria-hidden="true"><i id="wheelBar"></i></div>
+                <div class="wheel-display-box">
+                    <div class="wheel-pointer"></div>
+                    <canvas id="wheelCanvas" width="240" height="240" role="img" aria-label="wheel"></canvas>
+                </div>
+                <button type="button" id="spinBtn" class="spin-action-btn" disabled></button>
+                <button type="button" id="spinClaimBtn" class="spin-action-btn btn-green hidden"></button>
+                <p id="wheelResult" class="warn wheel-result" role="status" aria-live="polite"></p>
+            </div>
+        </section>
+
+        <!-- Wallet -->
+        <section id="tab-wallet" class="tab-content">
+            <div class="card center">
+                <h3 data-i18n="walletTitle">Withdraw ⭐ 💳</h3>
+                <p class="hint rich" id="minWithdraw"></p>
+                <div class="stat-box">
+                    <span data-i18n="balanceLabel">Balance:</span>
+                    <h2 id="walletBalance">0 ⭐</h2>
+                </div>
+                <div class="field">
+                    <label for="withdrawAmount" data-i18n="amountLabel">Requested ⭐ amount:</label>
+                    <input type="number" id="withdrawAmount" placeholder="0" min="25" step="0.01" inputmode="decimal">
+                </div>
+                <div class="field">
+                    <label for="payoutType" data-i18n="payoutLabel">Payout type:</label>
+                    <select id="payoutType" class="styled">
+                        <option value="gift" data-i18n="giftOption">🎁 Receive as Gift</option>
+                        <option value="balance" data-i18n="balanceOption">⭐ Direct Balance</option>
+                    </select>
+                </div>
+                <button type="button" id="withdrawBtn" class="btn-orange" data-i18n="withdrawBtn">Submit Request</button>
+                <div id="statusMsg" role="status" aria-live="polite"></div>
+                <div class="wd-list" id="wdList"></div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Language modal -->
+    <div id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="settingsTitle" data-i18n="settingsTitle">🌐 Language</h3>
+                <button type="button" class="close-modal" id="closeModal" data-i18n-aria="close" aria-label="Close">✕</button>
+            </div>
+            <div class="setting-item">
+                <label for="langSelect" data-i18n="language">Language</label>
+                <select id="langSelect">
+                    <option value="en">English</option>
+                    <option value="fa">فارسی</option>
+                    <option value="ar">العربية</option>
+                    <option value="ru">Русский</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <nav class="bottom-nav" aria-label="main">
+        <button type="button" class="nav-item active" data-tab="home"><span class="icon" aria-hidden="true">🏠</span><span data-i18n="navHome">Home</span></button>
+        <button type="button" class="nav-item" data-tab="ref"><span class="icon" aria-hidden="true">👥</span><span data-i18n="navRef">Referral</span></button>
+        <button type="button" class="nav-item" data-tab="league"><span class="icon" aria-hidden="true">🏆</span><span data-i18n="navLeague">League</span></button>
+        <button type="button" class="nav-item" data-tab="wheel"><span class="icon" aria-hidden="true">🎡</span><span data-i18n="navWheel">Wheel</span></button>
+        <button type="button" class="nav-item" data-tab="wallet"><span class="icon" aria-hidden="true">💰</span><span data-i18n="navWallet">Wallet</span></button>
+    </nav>
+</body>
+</html>
