@@ -1,0 +1,13 @@
+{
+  "name": "karem-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "KAReM Telegram Mini App – zero-dependency backend (Node >= 22.13)",
+  "main": "server.js",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "DEV_MODE=1 node server.js",
+    "test": "node test/smoke.js"
+  }
+}
