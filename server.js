@@ -1,6 +1,6 @@
 'use strict';
 /**
- * KAReM backend — zero dependencies (Node >= 22.13: node:http, node:sqlite, fetch).
+ * CAReM backend — zero dependencies (Node >= 22.13: node:http, node:sqlite, fetch).
  * All money logic, limits, timers, referral and wheel results live HERE (server time),
  * never in the browser.
  */
@@ -52,14 +52,15 @@ if (!cfg.devMode && !cfg.botToken) {
 const H = 3600 * 1000;
 const RULES = {
   waitSec: num(env.WAIT_SEC, 10), // minimum time between "Play" and "Claim"
+  captchaReward: 20, // paid for a correct captcha that was actually required
   spinWaitSec: num(env.SPIN_WAIT_SEC, 5),
-  perTaskLimit: num(env.TASK_LIMIT, 15), // ads per window
+  perTaskLimit: num(env.TASK_LIMIT, 10), // ads per window
   windowMs: 8 * H,
   dailyMs: 24 * H,
   dailyReward: 100, // all amounts are integers in milli-stars (1 ⭐ = 1000)
   minWithdraw: 25000,
   spinEarn: 15000,
-  refBonus: 100,
+  refBonus: 200,
   refAdsNeeded: 5,
   refPct: 10,
   captchaEvery: num(env.CAPTCHA_EVERY, 5),
@@ -68,18 +69,31 @@ const RULES = {
   subRecheckSec: num(env.SUB_RECHECK_SEC, 1800), // how often a finished subscribe task is re-verified
   maxPendingWithdrawals: 2,
 };
-const WHEEL = [0, 500, 0, 1500, 250, 0, 1000, 250]; // prize per slice (milli-stars), 0 = nothing
+const WHEEL_DEFAULT = [0, 500, 0, 1500, 250, 0, 5000, 250]; // prize per slice (milli-stars), 0 = nothing
+const WHEEL_WEIGHTS_DEFAULT = [10, 10, 10, 10, 10, 10, 7, 10]; // 5⭐ slice: ≈9.1 % instead of 12.5 %
+const WHEEL = (() => {
+  const w = (env.WHEEL || '').split(',').filter((x) => x.trim() !== '').map(Number);
+  return w.length >= 2 && w.every((x) => Number.isSafeInteger(x) && x >= 0) ? w : WHEEL_DEFAULT;
+})();
+const WHEEL_WEIGHTS = (() => {
+  const w = (env.WHEEL_WEIGHTS || '').split(',').filter((x) => x.trim() !== '').map(Number);
+  const ok = (a) => a.length === WHEEL.length && a.every((x) => Number.isSafeInteger(x) && x >= 0) && a.some((x) => x > 0);
+  return ok(w) ? w : ok(WHEEL_WEIGHTS_DEFAULT) ? WHEEL_WEIGHTS_DEFAULT : WHEEL.map(() => 1);
+})();
+const WHEEL_TOTAL = WHEEL_WEIGHTS.reduce((a, b) => a + b, 0);
+function rollWheel() { let r = crypto.randomInt(WHEEL_TOTAL); for (let i = 0; i < WHEEL_WEIGHTS.length; i++) { if (r < WHEEL_WEIGHTS[i]) return i; r -= WHEEL_WEIGHTS[i]; } return WHEEL.length - 1; }
 
 const httpsOrEmpty = (u) => (u && /^https:\/\//i.test(u) ? u : '');
 const TASKS = {
-  ad1: { type: 'ad', reward: 60, url: httpsOrEmpty(env.AD1_URL), postback: env.AD1_POSTBACK === '1' },
+  ad1: { type: 'ad', reward: 70, click: true, url: httpsOrEmpty(env.AD1_URL), postback: env.AD1_POSTBACK === '1' },
   ad2: { type: 'ad', reward: 50, url: httpsOrEmpty(env.AD2_URL), postback: env.AD2_POSTBACK === '1' },
-  ad3: { type: 'ad', reward: 40, url: httpsOrEmpty(env.AD3_URL), postback: env.AD3_POSTBACK === '1' },
+  ad3: { type: 'ad', reward: 30, url: httpsOrEmpty(env.AD3_URL), postback: env.AD3_POSTBACK === '1' },
   sub1: { type: 'sub', reward: 75, url: httpsOrEmpty(env.SUB1_URL), channel: env.SUB1_CHANNEL || '' },
   sub2: { type: 'sub', reward: 75, url: httpsOrEmpty(env.SUB2_URL), channel: env.SUB2_CHANNEL || '' },
 };
-const SPIN_AD_URL = httpsOrEmpty(env.SPIN_AD_URL);
-const EARN_KINDS = ['ad', 'sub', 'daily', 'ref_bonus', 'ref_commission'];
+// the wheel has exactly ONE ad: shown after the spin, before the prize is paid
+const SPIN_CLAIM_AD_URL = httpsOrEmpty(env.SPIN_CLAIM_AD_URL) || httpsOrEmpty(env.SPIN_AD_URL);
+const EARN_KINDS = ['ad', 'sub', 'daily', 'ref_bonus', 'ref_commission', 'captcha'];
 const COMMISSION_KINDS = ['ad', 'sub', 'daily'];
 
 // ───────────────────────── database ─────────────────────────
@@ -128,6 +142,9 @@ addColumn('devices', 'ip', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'debt', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('task_limits', 'paid', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('task_limits', 'last_check', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('sessions', 'clicked', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('sessions', 'prize', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('sessions', 'idx', 'INTEGER NOT NULL DEFAULT 0');
 db.exec('CREATE INDEX IF NOT EXISTS devices_fp ON devices(fp_hash, ip)');
 
 const _q = new Map();
@@ -293,6 +310,11 @@ function saveLimit(uid, key, r) {
     .run(uid, key, r.count, r.reset_at, r.last_claim_at, r.done);
 }
 const taskAvailable = (t) => (t.type === 'ad' ? !!t.url || cfg.devMode : (!!t.channel && !!cfg.botToken) || cfg.devMode);
+function baseUrl(req) {
+  try { if (cfg.webappUrl) return new URL(cfg.webappUrl).origin; } catch { /* fall through */ }
+  const proto = cfg.trustProxy ? String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim() : 'http';
+  return `${proto}://${req.headers.host}`;
+}
 const fillUrl = (url, sid, uid) => (url || '').replaceAll('{sid}', sid).replaceAll('{uid}', String(uid));
 
 function checkTaskOpen(uid, key, def, t) {
@@ -327,7 +349,7 @@ function buildState(uid) {
   for (const [key, def] of Object.entries(TASKS)) {
     const lim = limitRow(uid, key, t);
     tasks[key] = {
-      type: def.type, reward: def.reward, available: taskAvailable(def),
+      type: def.type, reward: def.reward, click: !!def.click, available: taskAvailable(def),
       count: lim.count, max: def.type === 'ad' ? RULES.perTaskLimit : 1,
       resetAt: def.type === 'ad' ? lim.reset_at : 0, done: !!lim.done,
     };
@@ -339,19 +361,20 @@ function buildState(uid) {
     now: t,
     user: { id: u.id, name: u.first_name || u.username || String(u.id) },
     balance: u.balance,
-    spin: { progress: Math.min(u.earned_total - u.spin_mark, RULES.spinEarn), need: RULES.spinEarn, ready: u.earned_total - u.spin_mark >= RULES.spinEarn },
+    spin: { progress: Math.min(u.earned_total - u.spin_mark, RULES.spinEarn), need: RULES.spinEarn, ready: u.earned_total - u.spin_mark >= RULES.spinEarn,
+      pending: (() => { const p = pendingPrize(uid); return p ? { prize: p.prize } : null; })() },
     daily: { nextAt: u.daily_next_at, reward: RULES.dailyReward },
     tasks,
     refs: {
       count: refs.c, active: refs.a,
       link: cfg.botUsername ? `https://t.me/${cfg.botUsername}?startapp=ref_${u.id}` : '',
     },
-    league: { rank, score },
+    league: { rank, score, endsAt: weekStart(t) + 7 * 24 * H },
     withdrawals: wd,
     captchaRequired: u.claims_since_captcha >= RULES.captchaEvery,
     config: {
       waitSec: RULES.waitSec, minWithdraw: RULES.minWithdraw, wheel: WHEEL,
-      refAdsNeeded: RULES.refAdsNeeded, refBonus: RULES.refBonus, refPct: RULES.refPct,
+      captchaReward: RULES.captchaReward, spinWaitSec: RULES.spinWaitSec, refAdsNeeded: RULES.refAdsNeeded, refBonus: RULES.refBonus, refPct: RULES.refPct,
       prizes: RULES.leaguePrizes, dev: cfg.devMode,
     },
   };
@@ -387,7 +410,9 @@ H_.taskStart = (c) => {
     q('DELETE FROM sessions WHERE user_id=? AND task=? AND used=0').run(c.user.id, key);
     const sid = crypto.randomBytes(16).toString('hex');
     q('INSERT INTO sessions(id,user_id,task,started_at) VALUES(?,?,?,?)').run(sid, c.user.id, key, t);
-    return { sessionId: sid, url: fillUrl(def.url, sid, c.user.id), waitSec: RULES.waitSec, state: buildState(c.user.id) };
+    // click-tracked ads open OUR interstitial page; its button goes through /r/:sid (records the click) and then redirects to the ad
+    const url = def.click ? `${baseUrl(c.req)}/ad.html?sid=${sid}` : fillUrl(def.url, sid, c.user.id);
+    return { sessionId: sid, url, waitSec: RULES.waitSec, state: buildState(c.user.id) };
   });
 };
 
@@ -433,15 +458,19 @@ H_.taskClaim = async (c) => {
       }
     }
     q('UPDATE users SET claims_since_captcha=claims_since_captcha+1 WHERE id=?').run(user.id);
-    earn(activated, def.type === 'ad' ? 'ad' : 'sub', def.reward, key);
-    return { reward: def.reward, state: buildState(user.id) };
+    const halved = !!def.click && !s2.clicked; // must click at least once for the full reward
+    const reward = halved ? Math.floor(def.reward / 2) : def.reward;
+    earn(activated, def.type === 'ad' ? 'ad' : 'sub', reward, key);
+    return { reward, halved, state: buildState(user.id) };
   });
 };
 
 H_.postback = (c) => {
   if (!cfg.postbackSecret || !safeEq(c.query.get('secret') || '', cfg.postbackSecret)) fail(403, 'FORBIDDEN');
   const sid = String(c.query.get('sid') || '');
-  const r = q('UPDATE sessions SET confirmed=1 WHERE id=? AND used=0').run(sid);
+  const r = c.query.get('event') === 'click'
+    ? q('UPDATE sessions SET clicked=1 WHERE id=? AND used=0').run(sid)
+    : q('UPDATE sessions SET confirmed=1 WHERE id=? AND used=0').run(sid);
   return { ok: true, updated: r.changes };
 };
 
@@ -463,35 +492,50 @@ H_.captchaVerify = (c) => {
   const ans = String(c.body.answer || '').trim().toUpperCase().slice(0, 8);
   if (!u.captcha_hash || now() > u.captcha_exp) fail(400, 'CAPTCHA_WRONG');
   if (safeEq(sha(`${ans}:${u.id}`), u.captcha_hash)) {
-    q('UPDATE users SET claims_since_captcha=0, captcha_hash=NULL, captcha_tries=0 WHERE id=?').run(u.id);
-    return { ok: true, state: buildState(u.id) };
+    return tx(() => {
+      const required = getUser(u.id).claims_since_captcha >= RULES.captchaEvery; // no farming: only a REQUIRED captcha pays
+      q('UPDATE users SET claims_since_captcha=0, captcha_hash=NULL, captcha_tries=0 WHERE id=?').run(u.id);
+      if (required) credit(u.id, 'captcha', RULES.captchaReward);
+      return { ok: true, reward: required ? RULES.captchaReward : 0, state: buildState(u.id) };
+    });
   }
   if (u.captcha_tries + 1 >= 3) q('UPDATE users SET captcha_hash=NULL, captcha_tries=0 WHERE id=?').run(u.id);
   else q('UPDATE users SET captcha_tries=captcha_tries+1 WHERE id=?').run(u.id);
   return fail(400, 'CAPTCHA_WRONG');
 };
 
-H_.spinStart = (c) => tx(() => {
-  const u = getUser(c.user.id);
-  if (u.earned_total - u.spin_mark < RULES.spinEarn) fail(409, 'NOT_READY');
-  q("DELETE FROM sessions WHERE user_id=? AND task='spin' AND used=0").run(u.id);
-  const sid = crypto.randomBytes(16).toString('hex');
-  q("INSERT INTO sessions(id,user_id,task,started_at) VALUES(?,?,'spin',?)").run(sid, u.id, now());
-  return { sessionId: sid, url: fillUrl(SPIN_AD_URL, sid, u.id), waitSec: RULES.spinWaitSec };
-});
+const pendingPrize = (uid) => q("SELECT * FROM sessions WHERE user_id=? AND task='spin_claim' AND used=0 ORDER BY started_at DESC LIMIT 1").get(uid);
+
+// Step 1: the spin (no ad before it). The prize is decided here on the server but is NOT paid yet.
 H_.spin = (c) => tx(() => {
   const t = now(); const u = getUser(c.user.id);
-  const s = q('SELECT * FROM sessions WHERE id=?').get(String(c.body.sessionId || ''));
-  if (!s || s.user_id !== u.id || s.used || s.task !== 'spin') fail(400, 'BAD_SESSION');
-  if (t - s.started_at < RULES.spinWaitSec * 1000) fail(429, 'TOO_EARLY', { retryMs: RULES.spinWaitSec * 1000 - (t - s.started_at) });
-  if (t - s.started_at > RULES.sessionMaxAgeMs) fail(410, 'EXPIRED');
+  if (pendingPrize(u.id)) fail(409, 'PENDING_PRIZE');
   if (u.earned_total - u.spin_mark < RULES.spinEarn) fail(409, 'NOT_READY');
-  q('UPDATE sessions SET used=1 WHERE id=?').run(s.id);
-  const index = crypto.randomInt(WHEEL.length); // server-side RNG
+  const index = rollWheel(); // server-side RNG
   const prize = WHEEL[index];
   q('UPDATE users SET spin_mark=earned_total WHERE id=?').run(u.id);
-  if (prize > 0) credit(u.id, 'spin', prize, String(index));
+  if (prize > 0) {
+    const sid = crypto.randomBytes(16).toString('hex');
+    q("INSERT INTO sessions(id,user_id,task,started_at,prize,idx) VALUES(?,?,'spin_claim',?,?,?)").run(sid, u.id, t, prize, index);
+  }
   return { index, prize, state: buildState(u.id) };
+});
+// Step 2a: the ONE wheel ad — user opens it (timer starts now) (timer starts now)
+H_.spinClaimStart = (c) => tx(() => {
+  const p = pendingPrize(c.user.id); if (!p) fail(404, 'NOT_FOUND');
+  q('UPDATE sessions SET confirmed=1, started_at=? WHERE id=?').run(now(), p.id);
+  return { sessionId: p.id, url: fillUrl(SPIN_CLAIM_AD_URL, p.id, c.user.id), waitSec: RULES.spinWaitSec };
+});
+// Step 2b: after the ad wait → the prize is credited
+H_.spinClaim = (c) => tx(() => {
+  const t = now();
+  const s = q('SELECT * FROM sessions WHERE id=?').get(String(c.body.sessionId || ''));
+  if (!s || s.user_id !== c.user.id || s.used || s.task !== 'spin_claim' || !s.confirmed) fail(400, 'BAD_SESSION');
+  if (t - s.started_at < RULES.spinWaitSec * 1000) fail(429, 'TOO_EARLY', { retryMs: RULES.spinWaitSec * 1000 - (t - s.started_at) });
+  if (t - s.started_at > RULES.sessionMaxAgeMs) { q('UPDATE sessions SET confirmed=0 WHERE id=?').run(s.id); fail(410, 'EXPIRED'); }
+  q('UPDATE sessions SET used=1 WHERE id=?').run(s.id);
+  credit(c.user.id, 'spin', s.prize, String(s.idx));
+  return { prize: s.prize, state: buildState(c.user.id) };
 });
 
 H_.withdraw = (c) => tx(() => {
@@ -624,8 +668,9 @@ const ROUTES = [
   ['POST', /^\/api\/daily$/, H_.daily, 'user'],
   ['GET', /^\/api\/captcha$/, H_.captchaGet, 'user'],
   ['POST', /^\/api\/captcha\/verify$/, H_.captchaVerify, 'user'],
-  ['POST', /^\/api\/spin\/start$/, H_.spinStart, 'user'],
   ['POST', /^\/api\/spin$/, H_.spin, 'user'],
+  ['POST', /^\/api\/spin\/claim\/start$/, H_.spinClaimStart, 'user'],
+  ['POST', /^\/api\/spin\/claim$/, H_.spinClaim, 'user'],
   ['POST', /^\/api\/withdraw$/, H_.withdraw, 'user'],
   ['GET', /^\/api\/league$/, H_.league, 'user'],
   ['GET', /^\/api\/postback$/, H_.postback, 'none'],
@@ -654,6 +699,18 @@ async function handleApi(req, res, url) {
   return handler(ctx);
 }
 
+function redirectClick(req, res, url) {
+  const ip = clientIp(req);
+  const sid = url.pathname.slice(3);
+  const s = /^[0-9a-f]{32}$/.test(sid) && !limited(`r:${ip}`, 60, 60000) ? q('SELECT * FROM sessions WHERE id=?').get(sid) : null;
+  const def = s && TASKS[s.task];
+  if (!s || !def || !def.click || !def.url) { res.writeHead(404, SEC_HEADERS); return res.end('Not found'); }
+  // a click only counts if it happens a moment after Play (and before the session is consumed)
+  if (!s.used && now() - s.started_at >= 1500) q('UPDATE sessions SET clicked=1 WHERE id=?').run(sid);
+  res.writeHead(302, { Location: fillUrl(def.url, sid, s.user_id), 'Cache-Control': 'no-store', ...SEC_HEADERS });
+  return res.end();
+}
+
 function serveStatic(req, res, url) {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); return res.end(); }
   let rel = decodeURIComponent(url.pathname);
@@ -673,6 +730,7 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     if (url.pathname === '/healthz') return send(res, 200, { ok: true });
     if (url.pathname.startsWith('/api/')) return send(res, 200, await handleApi(req, res, url));
+    if (url.pathname.startsWith('/r/') && req.method === 'GET') return redirectClick(req, res, url);
     return serveStatic(req, res, url);
   } catch (e) {
     if (e instanceof ApiError) return send(res, e.status, { error: e.code, ...e.extra });
@@ -693,7 +751,7 @@ async function onUpdate(up) {
     q('INSERT OR REPLACE INTO pending_refs(user_id,referrer_id,created_at) VALUES(?,?,?)').run(m.from.id, +rm[1], now());
   }
   const fa = (m.from.language_code || '').startsWith('fa');
-  const body = { chat_id: m.chat.id, text: fa ? '⭐ به KAReM خوش آمدید! با دکمه زیر برنامه را باز کنید.' : '⭐ Welcome to KAReM! Tap the button below to open the app.' };
+  const body = { chat_id: m.chat.id, text: fa ? '⭐ به CAReM خوش آمدید! با دکمه زیر برنامه را باز کنید.' : '⭐ Welcome to CAReM! Tap the button below to open the app.' };
   if (/^https:\/\//.test(cfg.webappUrl)) body.reply_markup = { inline_keyboard: [[{ text: fa ? '🚀 باز کردن برنامه' : '🚀 Open app', web_app: { url: cfg.webappUrl } }]] };
   await tg('sendMessage', body);
 }
@@ -744,14 +802,15 @@ async function recheckSubs() {
 // ───────────────────────── start ─────────────────────────
 function maintenance() {
   try {
-    q('DELETE FROM sessions WHERE started_at<?').run(now() - 24 * H);
+    q("DELETE FROM sessions WHERE started_at<? AND task!='spin_claim'").run(now() - 24 * H);
+    q("DELETE FROM sessions WHERE started_at<? AND task='spin_claim'").run(now() - 7 * 24 * H);
     q('DELETE FROM pending_refs WHERE created_at<?').run(now() - 7 * 24 * H);
     awardLastWeek();
   } catch (e) { log('maintenance error', e.message); }
 }
 
 server.listen(cfg.port, async () => {
-  log(`KAReM listening on :${cfg.port} (devMode=${cfg.devMode})`);
+  log(`CAReM listening on :${cfg.port} (devMode=${cfg.devMode})`);
   maintenance();
   setInterval(maintenance, H).unref();
   setInterval(recheckSubs, Math.max(1, Math.min(300, RULES.subRecheckSec)) * 1000).unref();
