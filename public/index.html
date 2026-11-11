@@ -113,8 +113,13 @@
                 <p class="hint" id="wheelDesc"></p>
                 <div class="progress" aria-hidden="true"><i id="wheelBar"></i></div>
                 <div class="wheel-display-box">
-                    <div class="wheel-pointer"></div>
-                    <canvas id="wheelCanvas" width="240" height="240" role="img" aria-label="wheel"></canvas>
+                    <div class="wheel-stage">
+                        <div class="wheel-aura" aria-hidden="true"></div>
+                        <canvas id="wheelBack" class="wheel-layer wheel-full" width="640" height="640" aria-hidden="true"></canvas>
+                        <canvas id="wheelCanvas" class="wheel-layer wheel-disc" width="504" height="504" role="img" aria-label="wheel"></canvas>
+                        <canvas id="wheelFx" class="wheel-layer wheel-full" width="640" height="640" aria-hidden="true"></canvas>
+                        <div class="wheel-pointer" aria-hidden="true"></div>
+                    </div>
                 </div>
                 <button type="button" id="spinBtn" class="spin-action-btn" disabled></button>
                 <button type="button" id="spinClaimBtn" class="spin-action-btn btn-green hidden"></button>

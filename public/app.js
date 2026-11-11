@@ -274,18 +274,52 @@
   }
 
   // ───────── wheel ─────────
-  const WHEEL_COLORS = ['#ef4444', '#2563eb', '#334155', '#d97706', '#059669', '#db2777', '#7c3aed', '#0d9488'];
+  // Galaxy Orb wheel. Three canvases: back ring (static) · slices+labels+stars (rotates) · rim/shading/hub (static).
+  const WHEEL_PAL = [['#312e81', '#6366f1'], ['#581c87', '#c084fc'], ['#831843', '#f472b6'], ['#1e3a8a', '#38bdf8'], ['#4c1d95', '#8b5cf6'], ['#9d174d', '#fb7185'], ['#92400e', '#fbbf24'], ['#134e4a', '#2dd4bf']];
+  function wStar(ctx, cx, cy, R, r, fill) {
+    ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5 - Math.PI / 2, rr = i % 2 ? r : R; ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
+    ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
+  }
   function drawWheel() {
-    const canvas = $('wheelCanvas'); const ctx = canvas.getContext('2d'); const slices = S.config.wheel;
-    const arc = (2 * Math.PI) / slices.length; const c = canvas.width / 2; const r = c - 5;
+    const TAU = Math.PI * 2; const slices = S.config.wheel; const n = slices.length; const arc = TAU / n;
+    // 1) rotating disc
+    const canvas = $('wheelCanvas'); const ctx = canvas.getContext('2d'); const c = canvas.width / 2; const R = c - 2;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save(); ctx.translate(c, c); ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.clip();
     slices.forEach((v, i) => {
-      const a = i * arc - Math.PI / 2;
-      ctx.beginPath(); ctx.fillStyle = WHEEL_COLORS[i % WHEEL_COLORS.length]; ctx.moveTo(c, c); ctx.arc(c, c, r, a, a + arc); ctx.lineTo(c, c); ctx.fill();
-      ctx.save(); ctx.translate(c, c); ctx.rotate(a + arc / 2); ctx.textAlign = 'right'; ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif';
-      ctx.fillText(v > 0 ? fmt(v) + '⭐' : '❌', r - 14, 4); ctx.restore();
+      const a = i * arc - Math.PI / 2; const pal = WHEEL_PAL[i % WHEEL_PAL.length];
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, R); g.addColorStop(0, pal[0]); g.addColorStop(1, pal[1]);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, R, a, a + arc); ctx.closePath(); ctx.fill();
     });
-    ctx.beginPath(); ctx.arc(c, c, 22, 0, 2 * Math.PI); ctx.fillStyle = '#0f0c1b'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#fde047'; ctx.stroke();
+    let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647; // fixed star-dust pattern
+    for (let i = 0; i < 110; i++) { const a = rnd() * TAU, d = Math.sqrt(rnd()) * R; ctx.fillStyle = `rgba(255,255,255,${0.2 + rnd() * 0.6})`; ctx.beginPath(); ctx.arc(Math.cos(a) * d, Math.sin(a) * d, rnd() * 1.8 + 0.4, 0, TAU); ctx.fill(); }
+    ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 2;
+    for (let i = 0; i < n; i++) { const a = i * arc - Math.PI / 2; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * R, Math.sin(a) * R); ctx.stroke(); }
+    ctx.restore();
+    const fs = R * 0.15;
+    slices.forEach((v, i) => {
+      const a = i * arc + arc / 2 - Math.PI / 2;
+      ctx.save(); ctx.translate(c + Math.cos(a) * R * 0.66, c + Math.sin(a) * R * 0.66); ctx.rotate(a + Math.PI / 2);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.shadowColor = 'rgba(0,0,40,.9)'; ctx.shadowBlur = 8; ctx.fillStyle = '#fff';
+      if (v > 0) { ctx.font = `800 ${fs}px sans-serif`; ctx.fillText(fmt(v), 0, -fs * 0.18); ctx.shadowBlur = 0; wStar(ctx, 0, fs * 0.95, fs * 0.42, fs * 0.18, '#fde047'); }
+      else { ctx.shadowBlur = 0; ctx.font = `${fs * 1.2}px sans-serif`; ctx.fillText('💨', 0, 0); }
+      ctx.restore();
+    });
+    // 2) static layers (ring behind / rim + sphere shading + hub + ring in front)
+    const bk = $('wheelBack'); const bc = bk.getContext('2d'); const fx = $('wheelFx'); const fc = fx.getContext('2d');
+    const m = bk.width / 2; const WR = R; const RR = WR * 1.17;
+    bc.clearRect(0, 0, bk.width, bk.height); fc.clearRect(0, 0, fx.width, fx.height);
+    bc.save(); bc.translate(m, m); bc.scale(1, 0.28); bc.strokeStyle = 'rgba(253,224,71,.35)'; bc.lineWidth = 20; bc.beginPath(); bc.arc(0, 0, RR, Math.PI, TAU); bc.stroke(); bc.restore();
+    fc.save(); fc.translate(m, m);
+    const sp = fc.createRadialGradient(-WR * 0.35, -WR * 0.4, WR * 0.1, 0, 0, WR);
+    sp.addColorStop(0, 'rgba(255,255,255,.38)'); sp.addColorStop(0.35, 'rgba(255,255,255,0)'); sp.addColorStop(0.75, 'rgba(0,0,10,.1)'); sp.addColorStop(1, 'rgba(0,0,15,.6)');
+    fc.fillStyle = sp; fc.beginPath(); fc.arc(0, 0, WR, 0, TAU); fc.fill();
+    fc.save(); fc.strokeStyle = 'rgba(216,180,254,.95)'; fc.lineWidth = 7; fc.shadowColor = '#c084fc'; fc.shadowBlur = 28; fc.beginPath(); fc.arc(0, 0, WR - 1, 0, TAU); fc.stroke(); fc.restore();
+    fc.save(); fc.scale(1, 0.28); fc.strokeStyle = 'rgba(253,224,71,.85)'; fc.lineWidth = 20; fc.shadowColor = '#fde047'; fc.shadowBlur = 24; fc.beginPath(); fc.arc(0, 0, RR, 0, Math.PI); fc.stroke(); fc.restore();
+    const hg = fc.createRadialGradient(-WR * 0.04, -WR * 0.05, 3, 0, 0, WR * 0.18); hg.addColorStop(0, '#ffffff'); hg.addColorStop(0.4, '#c4b5fd'); hg.addColorStop(1, '#4c1d95');
+    fc.shadowColor = '#a855f7'; fc.shadowBlur = 30; fc.fillStyle = hg; fc.beginPath(); fc.arc(0, 0, WR * 0.17, 0, TAU); fc.fill(); fc.shadowBlur = 0;
+    wStar(fc, 0, 0, WR * 0.1, WR * 0.042, '#fde047');
+    fc.restore();
   }
   const spinClaim = { sessionId: '', readyAt: 0, busy: false };
   function renderWheelState() {
