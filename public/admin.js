@@ -13,7 +13,7 @@
   const when = (ms) => (ms ? new Date(ms).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran', dateStyle: 'short', timeStyle: 'short' }) : '—');
   const ago = (ms) => { if (!ms) return '—'; const s = Math.max(0, (Date.now() - ms) / 1000); if (s < 90) return 'همین الان'; if (s < 5400) return Math.round(s / 60) + ' دقیقه پیش'; if (s < 129600) return Math.round(s / 3600) + ' ساعت پیش'; return Math.round(s / 86400) + ' روز پیش'; };
   const KIND = { ad: 'تبلیغ', sub: 'عضویت کانال', daily: 'پاداش روزانه', ref_bonus: 'بونوس رفرال', ref_commission: 'کمیسیون رفرال', captcha: 'کپچا', spin: 'گردونه', league_prize: 'جایزه لیگ', withdraw: 'برداشت', refund: 'بازگشت برداشت', sub_penalty: 'جریمه ترک کانال', debt_repay: 'پرداخت بدهی', admin_adjust: 'اصلاح دستی' };
-  const ERR = { UNAUTHORIZED: 'توکن نادرست است.', FORBIDDEN: 'IP شما مجاز نیست.', RATE_LIMIT: 'تلاش بیش از حد؛ چند دقیقه بعد دوباره امتحان کنید.', NOT_FOUND: 'پیدا نشد.', ALREADY_DONE: 'قبلاً تعیین تکلیف شده.', BAD_AMOUNT: 'مقدار نامعتبر است.', INSUFFICIENT: 'موجودی کاربر کافی نیست.', REASON_REQUIRED: 'دلیل لازم است.', NOT_CONFIGURED: 'بات تنظیم نشده.', BAD_URL: 'لینک باید معتبر باشد و با https:// شروع شود.', BAD_CHANNEL: 'کانال باید به شکل @username یا آیدی عددی (‎-100…‎) باشد.', DUPLICATE: 'این کانال قبلاً ثبت شده است.', CHANNEL_LOCKED: 'کانال بعد از ثبت قابل تغییر نیست؛ یک تسک جدید بسازید و این یکی را غیرفعال کنید.', NO_POSTBACK_SECRET: 'برای تایید با پست‌بک ابتدا ADS_POSTBACK_SECRET را در .env تنظیم کنید.', BAD_TASK: 'نوع تسک نامعتبر است.', TG_ERROR: 'ارتباط با تلگرام ناموفق بود.' };
+  const ERR = { UNAUTHORIZED: 'توکن نادرست است.', FORBIDDEN: 'IP شما مجاز نیست.', RATE_LIMIT: 'تلاش بیش از حد؛ چند دقیقه بعد دوباره امتحان کنید.', NOT_FOUND: 'پیدا نشد.', ALREADY_DONE: 'قبلاً تعیین تکلیف شده.', BAD_AMOUNT: 'مقدار نامعتبر است.', INSUFFICIENT: 'موجودی کاربر کافی نیست.', REASON_REQUIRED: 'دلیل لازم است.', NOT_CONFIGURED: 'بات تنظیم نشده.', BAD_URL: 'لینک باید معتبر باشد و با https:// شروع شود.', BAD_CHANNEL: 'کانال باید به شکل @username یا آیدی عددی (‎-100…‎) باشد.', DUPLICATE: 'این کانال قبلاً ثبت شده است.', CHANNEL_LOCKED: 'کانال بعد از ثبت قابل تغییر نیست؛ یک تسک جدید بسازید و این یکی را غیرفعال کنید.', NO_POSTBACK_SECRET: 'برای تایید با پست‌بک ابتدا ADS_POSTBACK_SECRET را در .env تنظیم کنید.', BAD_TASK: 'نوع تسک نامعتبر است.', TG_ERROR: 'ارتباط با تلگرام ناموفق بود.', DISABLED: 'بکاپ فعال نیست (BACKUP_CHAT_ID تنظیم نشده).' };
   const userLabel = (u) => (u.first_name || u.username || String(u.id)) + (u.username ? ' @' + u.username : '');
 
   let toastT = 0;
@@ -97,7 +97,37 @@
     const ch = $('charts'); ch.replaceChildren(
       barChart('کاربران جدید (۱۴ روز)', s.days, 'newUsers', String), barChart('کاربران فعال روزانه', s.days, 'activeUsers', String),
       barChart('⭐ پرداخت‌شده به کاربران', s.days, 'earned', stars), barChart('⭐ درخواست‌های برداشت', s.days, 'withdrawn', stars));
+    renderBackup(s.backup);
     $('kindTable').replaceChildren(table(['نوع', 'تعداد', 'مجموع ⭐'], s.byKind7d.map((r) => [KIND[r.kind] || r.kind, num(String(r.n)), signed(r.total)])));
+  }
+
+  // ───────── backup card ─────────
+  function renderBackup(b) {
+    const box = $('backupBox'); box.replaceChildren();
+    if (!b || !b.enabled) {
+      box.append(el('div', 'l', '⚠️ بکاپ خودکار فعال نیست؛ با هر ری‌استارت رایگان Render همه‌ی داده‌ها پاک می‌شود.'), el('div', 's', 'متغیر BACKUP_CHAT_ID را طبق راهنما تنظیم کنید.'));
+      return;
+    }
+    const bad = !!b.lastError || !b.lastOkAt;
+    const kv = el('div', 'kv'); const add = (k, v) => { const x = el('div'); x.append(el('b', '', k)); x.append(el('span', '', v)); kv.append(x); };
+    add('وضعیت', bad ? (b.lastOkAt ? '❌ آخرین تلاش ناموفق' : '⏳ هنوز بکاپی گرفته نشده') : '✅ سالم');
+    add('آخرین بکاپ موفق', ago(b.lastOkAt)); add('تعداد بکاپ‌ها از آخرین روشن شدن', String(b.uploads));
+    add('حجم', b.lastBytes ? (b.lastBytes / 1024).toFixed(1) + ' KB' : '—'); add('رمزگذاری', b.encrypted ? 'بله 🔒' : 'خیر (BACKUP_PASSPHRASE پیشنهاد می‌شود)');
+    add('بازیابی هنگام شروع', ({ restored: 'از بکاپ بازیابی شد ✅', none: 'بکاپی نبود (دیتابیس نو)', present: 'دیتابیس موجود بود', disabled: '—' })[b.restored && b.restored.status] || '—');
+    box.append(kv);
+    if (b.lastError) box.append(el('p', 'err', b.lastError));
+    const row = el('div', 'row');
+    row.append(
+      btn('📤 همین الان بکاپ بگیر', 'primary', async () => { const r = await guard(() => api('/api/admin/backup/run', {})); if (r) { toast(r.ok ? 'بکاپ گرفته شد ✅' : (r.error || 'ناموفق'), r.ok ? '' : 'bad'); loadDash(); } }),
+      btn('🔍 تست سلامت بکاپ در تلگرام', '', async () => { const r = await guard(() => api('/api/admin/backup/verify', {})); if (r) toast(r.ok ? `بکاپ قابل بازیابی است ✅ (${r.users ?? '?'} کاربر، ${ago(r.madeAt)})` : (r.error || 'ناموفق'), r.ok ? '' : 'bad'); }),
+      btn('⬇️ دانلود فایل دیتابیس', '', async () => {
+        try {
+          const res = await fetch('/api/admin/backup/download', { headers: { 'X-Admin-Token': token } });
+          if (!res.ok) throw new Error('خطا');
+          const url = URL.createObjectURL(await res.blob()); const a = document.createElement('a'); a.href = url; a.download = 'karem.db'; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+        } catch (e) { toast(e.message, 'bad'); }
+      }));
+    box.append(row);
   }
 
   // ───────── users ─────────
