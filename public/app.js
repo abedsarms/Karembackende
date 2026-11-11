@@ -127,7 +127,7 @@
   // ───────── state ─────────
   function applyState(s) {
     S = s; offset = s.now - Date.now();
-    if (!Object.keys(cards).length) buildCards();
+    syncCards();
     if (!wheelDrawn) { drawWheel(); wheelDrawn = true; }
     renderAll();
   }
@@ -153,8 +153,10 @@
 
   // ───────── task cards ─────────
   function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
-  function buildCards() {
+  function syncCards() {
+    for (const k of Object.keys(cards)) if (!S.tasks[k]) { cards[k].wrap.remove(); delete cards[k]; delete ui[k]; } // task removed / disabled by the admin
     for (const key of Object.keys(S.tasks)) {
+      if (cards[key]) continue;
       const t = S.tasks[key];
       const wrap = el('div', 'task-wrap');
       const limit = el('div', 'task-limit-info'); limit.setAttribute('role', 'status');
@@ -172,7 +174,7 @@
       $(t.type === 'ad' ? 'home-sec-ads' : 'home-sec-sub').append(wrap);
       play.addEventListener('click', () => startTask(key));
       claim.addEventListener('click', () => claimTask(key));
-      cards[key] = { limit, name, play, claim, guide, msg, type: t.type, n: Number(key.replace(/\D/g, '')) };
+      cards[key] = { wrap, limit, name, play, claim, guide, msg, type: t.type, n: Number(key.replace(/\D/g, '')) };
     }
   }
   function setMsg(key, cls, text) { ui[key] = ui[key] || {}; ui[key].cls = cls; ui[key].msg = text; }

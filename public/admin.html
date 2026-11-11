@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex,nofollow">
+    <meta name="color-scheme" content="dark">
+    <title>CAReM — پنل مدیریت</title>
+    <link rel="stylesheet" href="/admin.css">
+    <script src="/admin.js" defer></script>
+</head>
+<body>
+    <section id="login" class="login">
+        <form id="loginForm" class="login-card" autocomplete="off">
+            <h1>CA<span>R</span>eM</h1>
+            <p class="muted">پنل مدیریت</p>
+            <label for="tokenInput">توکن ادمین (ADMIN_TOKEN)</label>
+            <input id="tokenInput" type="password" dir="ltr" autocomplete="current-password" required>
+            <button type="submit" class="btn primary">ورود</button>
+            <p id="loginErr" class="err" role="alert"></p>
+        </form>
+    </section>
+
+    <div id="app" class="hidden">
+        <header class="top">
+            <h1 class="brand">CA<span>R</span>eM <small>مدیریت</small></h1>
+            <nav class="tabs" id="tabs">
+                <button type="button" data-tab="dash" class="active">📊 داشبورد</button>
+                <button type="button" data-tab="users">👥 کاربران</button>
+                <button type="button" data-tab="wd">💸 برداشت‌ها <b id="wdBadge" class="badge hidden"></b></button>
+                <button type="button" data-tab="ads">📢 تبلیغات و کانال‌ها</button>
+                <button type="button" data-tab="act">⚡ فعالیت</button>
+                <button type="button" data-tab="log">📝 گزارش مدیریت</button>
+            </nav>
+            <div class="top-actions">
+                <button type="button" id="refreshBtn" class="btn small" title="بازخوانی">⟳</button>
+                <button type="button" id="logoutBtn" class="btn small">خروج</button>
+            </div>
+        </header>
+
+        <main>
+            <section id="tab-dash" class="tab active">
+                <div class="cards" id="statCards"></div>
+                <div class="charts" id="charts"></div>
+                <h2>درآمد پرداختی به تفکیک نوع (۷ روز اخیر)</h2>
+                <div id="kindTable"></div>
+            </section>
+
+            <section id="tab-users" class="tab">
+                <form id="userFilters" class="filters">
+                    <input id="uq" type="search" placeholder="آیدی عددی، نام، یوزرنیم یا IP…" aria-label="جست‌وجو">
+                    <select id="usort" aria-label="مرتب‌سازی">
+                        <option value="recent">جدیدترین</option><option value="balance">بیشترین موجودی</option>
+                        <option value="earned">بیشترین درآمد</option><option value="seen">آخرین بازدید</option>
+                    </select>
+                    <label class="chk"><input type="checkbox" id="ufl"> مشکوک</label>
+                    <label class="chk"><input type="checkbox" id="ubn"> بن‌شده</label>
+                    <button class="btn primary" type="submit">جست‌وجو</button>
+                </form>
+                <div id="userTable"></div>
+                <div class="pager" id="userPager"></div>
+            </section>
+
+            <section id="tab-wd" class="tab">
+                <div class="filters">
+                    <select id="wdStatus" aria-label="وضعیت">
+                        <option value="pending">در انتظار</option><option value="approved">تایید شده</option>
+                        <option value="rejected">رد شده</option><option value="all">همه</option>
+                    </select>
+                </div>
+                <div id="wdTable"></div>
+            </section>
+
+            <section id="tab-ads" class="tab">
+                <div class="sec-head"><h2>📢 تبلیغات</h2><button type="button" class="btn small primary" id="addAd">➕ افزودن تبلیغ</button></div>
+                <div id="adsTable"></div>
+                <div class="sec-head"><h2>🔔 کانال‌های عضویت</h2><button type="button" class="btn small primary" id="addSub">➕ افزودن کانال</button></div>
+                <div id="subsTable"></div>
+                <h2>⚙️ تنظیمات عمومی</h2>
+                <form id="settingsForm" class="card form-grid">
+                    <label>تعداد تبلیغ مجاز برای هر تسک (قبل از ۸ ساعت استراحت)<input id="setLimit" type="number" min="1" max="1000" dir="ltr" required></label>
+                    <label>لینک تبلیغ گردونه شانس (بعد از چرخش)<input id="setSpinAd" type="url" dir="ltr" placeholder="https://…"></label>
+                    <button class="btn primary" type="submit">ذخیره تنظیمات</button>
+                </form>
+                <p class="muted" id="adsHint"></p>
+            </section>
+
+            <section id="tab-act" class="tab">
+                <div class="filters">
+                    <select id="actKind" aria-label="نوع">
+                        <option value="">همه‌ی تراکنش‌ها</option>
+                    </select>
+                </div>
+                <div id="actTable"></div>
+            </section>
+
+            <section id="tab-log" class="tab"><div id="logTable"></div></section>
+        </main>
+    </div>
+
+    <div id="drawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+        <div class="drawer-panel">
+            <div class="drawer-head"><h2 id="drawerTitle">کاربر</h2><button type="button" id="drawerClose" class="btn small" aria-label="بستن">✕</button></div>
+            <div id="drawerBody"></div>
+        </div>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
