@@ -32,6 +32,7 @@ const cfg = {
   devMode: env.DEV_MODE === '1',
   testMode: env.NODE_ENV === 'test',
   adminToken: env.ADMIN_TOKEN || '',
+  adminIps: (env.ADMIN_IPS || '').split(',').map((x) => x.trim()).filter(Boolean), // optional allow-list for the admin API
   adminIds: (env.ADMIN_IDS || '').split(',').map((s) => s.trim()).filter(Boolean).map(Number),
   dbPath: env.DB_PATH || path.join(__dirname, 'data', 'karem.db'),
   tgApi: env.TG_API_BASE || 'https://api.telegram.org',
@@ -84,15 +85,18 @@ const WHEEL_TOTAL = WHEEL_WEIGHTS.reduce((a, b) => a + b, 0);
 function rollWheel() { let r = crypto.randomInt(WHEEL_TOTAL); for (let i = 0; i < WHEEL_WEIGHTS.length; i++) { if (r < WHEEL_WEIGHTS[i]) return i; r -= WHEEL_WEIGHTS[i]; } return WHEEL.length - 1; }
 
 const httpsOrEmpty = (u) => (u && /^https:\/\//i.test(u) ? u : '');
-const TASKS = {
+// First-run defaults (from .env). After the first start the live configuration is stored in the database
+// and is managed from the admin panel (📢 tab) — editing .env afterwards does not change existing tasks.
+const TASK_DEFAULTS = {
   ad1: { type: 'ad', reward: 70, click: true, url: httpsOrEmpty(env.AD1_URL), postback: env.AD1_POSTBACK === '1' },
   ad2: { type: 'ad', reward: 50, url: httpsOrEmpty(env.AD2_URL), postback: env.AD2_POSTBACK === '1' },
   ad3: { type: 'ad', reward: 30, url: httpsOrEmpty(env.AD3_URL), postback: env.AD3_POSTBACK === '1' },
   sub1: { type: 'sub', reward: 75, url: httpsOrEmpty(env.SUB1_URL), channel: env.SUB1_CHANNEL || '' },
   sub2: { type: 'sub', reward: 75, url: httpsOrEmpty(env.SUB2_URL), channel: env.SUB2_CHANNEL || '' },
 };
+const TASKS = {}; // key -> { type, reward, url, channel, click, postback, enabled }  (mutable, loaded from DB)
 // the wheel has exactly ONE ad: shown after the spin, before the prize is paid
-const SPIN_CLAIM_AD_URL = httpsOrEmpty(env.SPIN_CLAIM_AD_URL) || httpsOrEmpty(env.SPIN_AD_URL);
+const SETTINGS = { spinAdUrl: httpsOrEmpty(env.SPIN_CLAIM_AD_URL) || httpsOrEmpty(env.SPIN_AD_URL) }; // overridden by DB
 const EARN_KINDS = ['ad', 'sub', 'daily', 'ref_bonus', 'ref_commission', 'captcha'];
 const COMMISSION_KINDS = ['ad', 'sub', 'daily'];
 
@@ -132,6 +136,10 @@ CREATE TABLE IF NOT EXISTS withdrawals(
   type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', note TEXT,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS wd_user ON withdrawals(user_id);
+CREATE TABLE IF NOT EXISTS tasks(key TEXT PRIMARY KEY, type TEXT NOT NULL, reward INTEGER NOT NULL, url TEXT NOT NULL DEFAULT '', channel TEXT NOT NULL DEFAULT '',
+  click INTEGER NOT NULL DEFAULT 0, postback INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, action TEXT NOT NULL, target TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS league_awards(week TEXT NOT NULL, rank INTEGER NOT NULL, user_id INTEGER NOT NULL, amount INTEGER NOT NULL, PRIMARY KEY(week, rank));
 CREATE TABLE IF NOT EXISTS devices(device_hash TEXT NOT NULL, user_id INTEGER NOT NULL, first_seen INTEGER NOT NULL, PRIMARY KEY(device_hash, user_id));
 `);
@@ -213,6 +221,26 @@ async function isMember(channel, userId) {
 
 // ───────────────────────── users / auth ─────────────────────────
 const getUser = (id) => q('SELECT * FROM users WHERE id=?').get(id);
+
+// ───────────────────────── task / settings storage (managed from the admin panel) ─────────────────────────
+function loadTasks() {
+  if (!q('SELECT COUNT(*) c FROM tasks').get().c) {
+    let i = 0;
+    for (const [key, d] of Object.entries(TASK_DEFAULTS)) {
+      q('INSERT INTO tasks(key,type,reward,url,channel,click,postback,enabled,sort,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
+        .run(key, d.type, d.reward, d.url || '', d.channel || '', d.click ? 1 : 0, d.postback ? 1 : 0, 1, i++, now());
+    }
+  }
+  for (const k of Object.keys(TASKS)) delete TASKS[k];
+  for (const r of q('SELECT * FROM tasks ORDER BY type, sort, key').all()) {
+    TASKS[r.key] = { type: r.type, reward: r.reward, url: r.url, channel: r.channel, click: !!r.click, postback: !!r.postback, enabled: !!r.enabled };
+  }
+  const st = Object.fromEntries(q('SELECT key, value FROM settings').all().map((r) => [r.key, r.value]));
+  if (st.spinAdUrl !== undefined) SETTINGS.spinAdUrl = st.spinAdUrl;
+  if (st.perTaskLimit !== undefined && Number.isSafeInteger(+st.perTaskLimit) && +st.perTaskLimit > 0) RULES.perTaskLimit = +st.perTaskLimit;
+}
+const saveSetting = (k, v) => q('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, String(v));
+loadTasks();
 
 function ensureUser(tgu, startParam, ctx) {
   const t = now();
@@ -309,7 +337,7 @@ function saveLimit(uid, key, r) {
      ON CONFLICT(user_id,task) DO UPDATE SET count=excluded.count,reset_at=excluded.reset_at,last_claim_at=excluded.last_claim_at,done=excluded.done`)
     .run(uid, key, r.count, r.reset_at, r.last_claim_at, r.done);
 }
-const taskAvailable = (t) => (t.type === 'ad' ? !!t.url || cfg.devMode : (!!t.channel && !!cfg.botToken) || cfg.devMode);
+const taskAvailable = (t) => t.enabled && (t.type === 'ad' ? !!t.url || cfg.devMode : (!!t.channel && !!cfg.botToken) || cfg.devMode);
 function baseUrl(req) {
   try { if (cfg.webappUrl) return new URL(cfg.webappUrl).origin; } catch { /* fall through */ }
   const proto = cfg.trustProxy ? String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim() : 'http';
@@ -347,6 +375,7 @@ function buildState(uid) {
   const u = getUser(uid); const t = now();
   const tasks = {};
   for (const [key, def] of Object.entries(TASKS)) {
+    if (!def.enabled) continue; // disabled tasks are hidden from users
     const lim = limitRow(uid, key, t);
     tasks[key] = {
       type: def.type, reward: def.reward, click: !!def.click, available: taskAvailable(def),
@@ -524,7 +553,7 @@ H_.spin = (c) => tx(() => {
 H_.spinClaimStart = (c) => tx(() => {
   const p = pendingPrize(c.user.id); if (!p) fail(404, 'NOT_FOUND');
   q('UPDATE sessions SET confirmed=1, started_at=? WHERE id=?').run(now(), p.id);
-  return { sessionId: p.id, url: fillUrl(SPIN_CLAIM_AD_URL, p.id, c.user.id), waitSec: RULES.spinWaitSec };
+  return { sessionId: p.id, url: fillUrl(SETTINGS.spinAdUrl, p.id, c.user.id), waitSec: RULES.spinWaitSec };
 });
 // Step 2b: after the ad wait → the prize is credited
 H_.spinClaim = (c) => tx(() => {
@@ -569,9 +598,12 @@ H_.league = (c) => {
 };
 
 // ───────────────────────── admin ─────────────────────────
+function logAdmin(action, target, detail) { q('INSERT INTO admin_log(at,action,target,detail) VALUES(?,?,?,?)').run(now(), action, target || null, detail || null); }
 H_.adminWithdrawals = (c) => {
   const st = c.query.get('status') || 'pending';
-  return { items: q('SELECT w.*, u.username, u.first_name FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status=? ORDER BY w.id ASC LIMIT 200').all(st) };
+  const where = st === 'all' ? '' : 'WHERE w.status=?';
+  const sql = `SELECT w.*, u.username, u.first_name, u.balance, u.flagged, u.banned FROM withdrawals w JOIN users u ON u.id=w.user_id ${where} ORDER BY w.id ${st === 'pending' ? 'ASC' : 'DESC'} LIMIT 200`;
+  return { items: st === 'all' ? q(sql).all() : q(sql).all(st) };
 };
 H_.adminWithdrawalAction = (c) => {
   const id = +c.params.id; const action = c.body.action;
@@ -585,6 +617,7 @@ H_.adminWithdrawalAction = (c) => {
     if (status === 'rejected') credit(row.user_id, 'refund', row.amount, String(id)); // refund (not counted as earning)
     return { ...row, status };
   });
+  logAdmin('withdrawal_' + w.status, String(w.id), `user ${w.user_id}, ${w.amount / 1000} ⭐`);
   notify(w.user_id, w.status === 'approved' ? `✅ Your withdrawal #${w.id} (${w.amount / 1000} ⭐) was approved.` : `❌ Your withdrawal #${w.id} was rejected and ${w.amount / 1000} ⭐ returned to your balance.`);
   return { ok: true, status: w.status };
 };
@@ -592,13 +625,190 @@ H_.adminBan = (c) => {
   const id = +c.params.id; const banned = c.body.banned ? 1 : 0;
   const r = q('UPDATE users SET banned=? WHERE id=?').run(banned, id);
   if (!r.changes) fail(404, 'NOT_FOUND');
+  logAdmin(banned ? 'ban' : 'unban', String(id));
   return { ok: true, banned };
 };
-H_.adminStats = () => ({
-  users: q('SELECT COUNT(*) c FROM users').get().c,
-  totalBalance: q('SELECT COALESCE(SUM(balance),0) s FROM users').get().s,
-  pendingWithdrawals: q("SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM withdrawals WHERE status='pending'").get(),
+H_.adminStats = () => {
+  const t = now(); const day = 24 * H; const d0 = new Date(t); const midnight = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), d0.getUTCDate());
+  const since = midnight - 13 * day;
+  const series = {};
+  const put = (rows, key) => rows.forEach((r) => { (series[r.d] = series[r.d] || {})[key] = r.v; });
+  put(q("SELECT strftime('%Y-%m-%d', created_at/1000,'unixepoch') d, COUNT(*) v FROM users WHERE created_at>=? GROUP BY d").all(since), 'newUsers');
+  put(q(`SELECT strftime('%Y-%m-%d', created_at/1000,'unixepoch') d, COUNT(DISTINCT user_id) v FROM ledger WHERE created_at>=? AND kind IN (${EARN_IN}) GROUP BY d`).all(since), 'activeUsers');
+  put(q(`SELECT strftime('%Y-%m-%d', created_at/1000,'unixepoch') d, SUM(amount) v FROM ledger WHERE created_at>=? AND kind IN (${EARN_IN}) AND amount>0 GROUP BY d`).all(since), 'earned');
+  put(q("SELECT strftime('%Y-%m-%d', created_at/1000,'unixepoch') d, SUM(amount) v FROM withdrawals WHERE created_at>=? GROUP BY d").all(since), 'withdrawn');
+  const days = [];
+  for (let i = 13; i >= 0; i--) { const k = new Date(midnight - i * day).toISOString().slice(0, 10); days.push({ day: k, newUsers: 0, activeUsers: 0, earned: 0, withdrawn: 0, ...(series[k] || {}) }); }
+  return {
+    users: q('SELECT COUNT(*) c FROM users').get().c,
+    totalBalance: q('SELECT COALESCE(SUM(balance),0) s FROM users').get().s,
+    totalDebt: q('SELECT COALESCE(SUM(debt),0) s FROM users').get().s,
+    pendingWithdrawals: q("SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM withdrawals WHERE status='pending'").get(),
+    approvedWithdrawals: q("SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM withdrawals WHERE status='approved'").get(),
+    new24h: q('SELECT COUNT(*) c FROM users WHERE created_at>?').get(t - day).c,
+    active24h: q('SELECT COUNT(*) c FROM users WHERE last_seen>?').get(t - day).c,
+    online15m: q('SELECT COUNT(*) c FROM users WHERE last_seen>?').get(t - 15 * 60000).c,
+    banned: q('SELECT COUNT(*) c FROM users WHERE banned=1').get().c,
+    flagged: q('SELECT COUNT(*) c FROM users WHERE flagged=1').get().c,
+    referred: q('SELECT COUNT(*) c FROM users WHERE referrer_id IS NOT NULL').get().c,
+    byKind7d: q('SELECT kind, COUNT(*) n, SUM(amount) total FROM ledger WHERE created_at>? GROUP BY kind ORDER BY total DESC').all(t - 7 * day),
+    days, serverTime: t,
+  };
+};
+const userCols = 'id, username, first_name, balance, debt, earned_total, banned, flagged, referrer_id, ref_ads, ref_rewarded, ip, created_at, last_seen';
+H_.adminUsers = (c) => {
+  const qs = (c.query.get('q') || '').trim().slice(0, 64); const sort = c.query.get('sort') || 'recent';
+  const page = Math.max(0, Math.min(10000, +c.query.get('page') || 0)); const per = 25;
+  const where = []; const args = [];
+  if (qs) {
+    if (/^\d{1,15}$/.test(qs)) { where.push('id=?'); args.push(+qs); }
+    else {
+      const like = '%' + qs.replace(/[\\%_]/g, '\\$&') + '%';
+      where.push("(username LIKE ? ESCAPE '\\' OR first_name LIKE ? ESCAPE '\\' OR ip=?)"); args.push(like, like, qs);
+    }
+  }
+  if (c.query.get('banned') === '1') where.push('banned=1');
+  if (c.query.get('flagged') === '1') where.push('flagged=1');
+  const order = { recent: 'created_at DESC', balance: 'balance DESC', earned: 'earned_total DESC', seen: 'last_seen DESC' }[sort] || 'created_at DESC';
+  const w = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const total = q(`SELECT COUNT(*) c FROM users ${w}`).get(...args).c;
+  const items = q(`SELECT ${userCols}, (SELECT COUNT(*) FROM users r WHERE r.referrer_id=users.id) refs FROM users ${w} ORDER BY ${order} LIMIT ${per} OFFSET ${page * per}`).all(...args);
+  return { items, total, page, per };
+};
+H_.adminUser = (c) => {
+  const id = +c.params.id; const user = q(`SELECT ${userCols}, device_hash, spin_mark, claims_since_captcha, daily_next_at FROM users WHERE id=?`).get(id);
+  if (!user) fail(404, 'NOT_FOUND');
+  const devices = q('SELECT substr(device_hash,1,10) device, substr(fp_hash,1,10) fp, ip, first_seen FROM devices WHERE user_id=?').all(id);
+  const sameDevice = q(`SELECT DISTINCT u.id, u.first_name, u.username, u.banned FROM users u JOIN devices d ON d.user_id=u.id
+    WHERE u.id!=? AND d.device_hash IN (SELECT device_hash FROM devices WHERE user_id=? AND device_hash!='')`).all(id, id);
+  const sameIp = user.ip ? q('SELECT id, first_name, username, banned FROM users WHERE ip=? AND id!=? LIMIT 20').all(user.ip, id) : [];
+  return {
+    user: { ...user, device_hash: undefined },
+    referrer: user.referrer_id ? q('SELECT id, first_name, username FROM users WHERE id=?').get(user.referrer_id) || null : null,
+    referrals: q('SELECT id, first_name, username, ref_ads, ref_rewarded, created_at FROM users WHERE referrer_id=? ORDER BY created_at DESC LIMIT 100').all(id),
+    ledger: q('SELECT id, kind, amount, ref, created_at FROM ledger WHERE user_id=? ORDER BY id DESC LIMIT 150').all(id),
+    totals: q('SELECT kind, COUNT(*) n, SUM(amount) total FROM ledger WHERE user_id=? GROUP BY kind').all(id),
+    withdrawals: q('SELECT id, amount, type, status, note, created_at FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 50').all(id),
+    tasks: q('SELECT task, count, reset_at, done, last_claim_at FROM task_limits WHERE user_id=?').all(id),
+    devices, sameDevice, sameIp,
+  };
+};
+H_.adminActivity = (c) => {
+  const kind = (c.query.get('kind') || '').replace(/[^a-z_]/g, '');
+  const rows = q(`SELECT l.id, l.user_id, u.first_name, u.username, l.kind, l.amount, l.ref, l.created_at FROM ledger l JOIN users u ON u.id=l.user_id ${kind ? 'WHERE l.kind=?' : ''} ORDER BY l.id DESC LIMIT 150`);
+  return { items: kind ? rows.all(kind) : rows.all() };
+};
+// ───────────────────────── admin: ads & channel tasks ─────────────────────────
+const isHttps = (u) => typeof u === 'string' && u.length <= 500 && /^https:\/\/[^\s]+$/i.test(u);
+const CHANNEL_RE = /^(@[A-Za-z][A-Za-z0-9_]{3,31}|-100\d{5,15})$/;
+const persistTask = (key) => {
+  const d = TASKS[key];
+  q(`INSERT INTO tasks(key,type,reward,url,channel,click,postback,enabled,sort,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(key) DO UPDATE SET reward=excluded.reward,url=excluded.url,channel=excluded.channel,click=excluded.click,postback=excluded.postback,enabled=excluded.enabled,updated_at=excluded.updated_at`)
+    .run(key, d.type, d.reward, d.url, d.channel, d.click ? 1 : 0, d.postback ? 1 : 0, d.enabled ? 1 : 0, Number(key.replace(/\D/g, '')) || 0, now());
+};
+H_.adminTasks = (c) => {
+  const t = now();
+  const claims = Object.fromEntries(q("SELECT ref, COUNT(*) n, COALESCE(SUM(amount),0) paid, COALESCE(SUM(CASE WHEN created_at>? THEN 1 ELSE 0 END),0) n24 FROM ledger WHERE kind IN ('ad','sub') GROUP BY ref").all(t - 24 * H).map((r) => [r.ref, r]));
+  const sess = Object.fromEntries(q('SELECT task, COUNT(*) n, COALESCE(SUM(clicked),0) c FROM sessions WHERE used=1 GROUP BY task').all().map((r) => [r.task, r]));
+  const subs = Object.fromEntries(q('SELECT task, COUNT(*) n FROM task_limits WHERE done=1 GROUP BY task').all().map((r) => [r.task, r.n]));
+  const items = Object.entries(TASKS).map(([key, d]) => ({
+    key, ...d, claims: (claims[key] || {}).n || 0, claims24: (claims[key] || {}).n24 || 0, paid: (claims[key] || {}).paid || 0,
+    sessions24: (sess[key] || {}).n || 0, clicks24: (sess[key] || {}).c || 0, subscribed: subs[key] || 0,
+  }));
+  return {
+    items, settings: { spinAdUrl: SETTINGS.spinAdUrl, perTaskLimit: RULES.perTaskLimit }, botConfigured: !!cfg.botToken,
+    postbackTemplate: cfg.postbackSecret ? `${baseUrl(c.req)}/api/postback?secret=${cfg.postbackSecret}&sid={sid}` : '',
+  };
+};
+function readTaskFields(b, cur) {
+  const out = { ...cur };
+  if (b.reward_m !== undefined) { if (!Number.isSafeInteger(b.reward_m) || b.reward_m < 1 || b.reward_m > 1e7) fail(400, 'BAD_AMOUNT'); out.reward = b.reward_m; }
+  if (b.url !== undefined) { const u = String(b.url).trim(); if (u && !isHttps(u)) fail(400, 'BAD_URL'); out.url = u; }
+  if (b.enabled !== undefined) out.enabled = !!b.enabled;
+  if (out.type === 'ad') {
+    if (b.click !== undefined) out.click = !!b.click;
+    if (b.postback !== undefined) out.postback = !!b.postback;
+    if (out.postback && !cfg.postbackSecret) fail(400, 'NO_POSTBACK_SECRET');
+  } else { out.click = false; out.postback = false; }
+  if (out.type === 'ad' && out.enabled && !out.url) fail(400, 'BAD_URL');
+  return out;
+}
+H_.adminTaskCreate = (c) => tx(() => {
+  const type = c.body.type; if (!['ad', 'sub'].includes(type)) fail(400, 'BAD_TASK');
+  let channel = '';
+  if (type === 'sub') {
+    channel = String(c.body.channel || '').trim(); if (!CHANNEL_RE.test(channel)) fail(400, 'BAD_CHANNEL');
+    if (Object.values(TASKS).some((d) => d.type === 'sub' && d.channel.toLowerCase() === channel.toLowerCase())) fail(409, 'DUPLICATE');
+    if (!isHttps(String(c.body.url || '').trim())) fail(400, 'BAD_URL');
+  }
+  const base = { type, reward: 0, url: '', channel, click: false, postback: false, enabled: true };
+  if (c.body.reward_m === undefined) fail(400, 'BAD_AMOUNT');
+  const d = readTaskFields(c.body, base);
+  const used = [...Object.keys(TASKS), ...q('SELECT DISTINCT task FROM task_limits WHERE task LIKE ?').all(type + '%').map((r) => r.task)];
+  const key = type + (Math.max(0, ...used.filter((k) => k.startsWith(type)).map((k) => +k.slice(type.length) || 0)) + 1); // never reuse an old key (its history stays separate)
+  TASKS[key] = d; persistTask(key);
+  logAdmin('task_create', key, `${type} ${d.reward / 1000} ⭐ ${d.channel || d.url}`.slice(0, 200));
+  return { ok: true, key };
 });
+H_.adminTaskUpdate = (c) => tx(() => {
+  const key = c.params.key; const cur = TASKS[key]; if (!cur) fail(404, 'NOT_FOUND');
+  if (c.body.channel !== undefined && String(c.body.channel).trim() !== cur.channel) fail(400, 'CHANNEL_LOCKED'); // changing it would make the re-check punish everyone who joined the old channel
+  const d = readTaskFields(c.body, cur); TASKS[key] = d; persistTask(key);
+  logAdmin('task_update', key, JSON.stringify({ reward: d.reward / 1000, url: d.url, enabled: d.enabled, click: d.click, postback: d.postback }).slice(0, 200));
+  return { ok: true };
+});
+H_.adminTaskDelete = (c) => tx(() => {
+  const key = c.params.key; if (!TASKS[key]) fail(404, 'NOT_FOUND');
+  delete TASKS[key]; q('DELETE FROM tasks WHERE key=?').run(key); q('DELETE FROM sessions WHERE task=? AND used=0').run(key);
+  logAdmin('task_delete', key); return { ok: true };
+});
+H_.adminSettings = (c) => {
+  if (c.body.spinAdUrl !== undefined) { const u = String(c.body.spinAdUrl).trim(); if (u && !isHttps(u)) fail(400, 'BAD_URL'); SETTINGS.spinAdUrl = u; saveSetting('spinAdUrl', u); }
+  if (c.body.perTaskLimit !== undefined) { const n = c.body.perTaskLimit; if (!Number.isSafeInteger(n) || n < 1 || n > 1000) fail(400, 'BAD_AMOUNT'); RULES.perTaskLimit = n; saveSetting('perTaskLimit', n); }
+  logAdmin('settings', null, JSON.stringify({ spinAdUrl: SETTINGS.spinAdUrl, perTaskLimit: RULES.perTaskLimit }).slice(0, 200));
+  return { ok: true };
+};
+let botId = 0;
+H_.adminCheckChannel = async (c) => {
+  const channel = String(c.body.channel || '').trim(); if (!CHANNEL_RE.test(channel)) fail(400, 'BAD_CHANNEL');
+  if (!cfg.botToken) fail(503, 'NOT_CONFIGURED');
+  try {
+    if (!botId) { const me = await tg('getMe'); if (me.ok) botId = me.result.id; }
+    const chat = await tg('getChat', { chat_id: channel });
+    if (!chat.ok) return { ok: false, error: chat.description || 'chat not found' };
+    const me = await tg('getChatMember', { chat_id: channel, user_id: botId });
+    const status = me.ok ? me.result.status : 'unknown';
+    const cnt = await tg('getChatMemberCount', { chat_id: channel });
+    return { ok: true, title: chat.result.title || '', type: chat.result.type, botStatus: status, botIsAdmin: ['administrator', 'creator'].includes(status), members: cnt.ok ? cnt.result : null };
+  } catch { fail(502, 'TG_ERROR'); }
+};
+H_.adminLog = () => ({ items: q('SELECT * FROM admin_log ORDER BY id DESC LIMIT 100').all() });
+const adminUserId = (c) => { const id = +c.params.id; if (!getUser(id)) fail(404, 'NOT_FOUND'); return id; };
+H_.adminFlag = (c) => { const id = adminUserId(c); const f = c.body.flagged ? 1 : 0; q('UPDATE users SET flagged=? WHERE id=?').run(f, id); logAdmin(f ? 'flag' : 'unflag', String(id)); return { ok: true, flagged: f }; };
+H_.adminResetDevices = (c) => { const id = adminUserId(c); const r = q('DELETE FROM devices WHERE user_id=?').run(id); logAdmin('reset_devices', String(id), `${r.changes} rows`); return { ok: true, removed: Number(r.changes) }; };
+H_.adminAdjust = (c) => tx(() => {
+  const id = adminUserId(c); const amt = c.body.amount_m; const reason = String(c.body.reason || '').trim().slice(0, 200);
+  if (!Number.isSafeInteger(amt) || amt === 0 || Math.abs(amt) > 1e9) fail(400, 'BAD_AMOUNT');
+  if (!reason) fail(400, 'REASON_REQUIRED');
+  const u = getUser(id);
+  if (amt > 0) credit(id, 'admin_adjust', amt, reason);
+  else {
+    if (-amt > u.balance) fail(400, 'INSUFFICIENT');
+    q('UPDATE users SET balance=balance-? WHERE id=?').run(-amt, id);
+    q('INSERT INTO ledger(user_id,kind,amount,ref,created_at) VALUES(?,?,?,?,?)').run(id, 'admin_adjust', amt, reason, now());
+  }
+  logAdmin('adjust', String(id), `${amt / 1000} ⭐ — ${reason}`);
+  return { ok: true, balance: getUser(id).balance };
+});
+H_.adminMessage = async (c) => {
+  const id = adminUserId(c); const text = String(c.body.text || '').trim().slice(0, 500);
+  if (!text) fail(400, 'BAD_AMOUNT');
+  if (!cfg.botToken) fail(503, 'NOT_CONFIGURED');
+  const r = await tg('sendMessage', { chat_id: id, text }).catch(() => null);
+  logAdmin('message', String(id), text.slice(0, 80));
+  return { ok: !!(r && r.ok) };
+};
 
 // ───────────────────────── weekly league prizes ─────────────────────────
 function awardLastWeek() {
@@ -633,6 +843,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
 const SEC_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
+  'X-Robots-Tag': 'noindex',
   'Referrer-Policy': 'no-referrer',
   'Content-Security-Policy': "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors https://web.telegram.org https://webk.telegram.org https://webz.telegram.org https://*.telegram.org; base-uri 'none'; form-action 'none'",
 };
@@ -675,6 +886,20 @@ const ROUTES = [
   ['GET', /^\/api\/league$/, H_.league, 'user'],
   ['GET', /^\/api\/postback$/, H_.postback, 'none'],
   ['GET', /^\/api\/admin\/stats$/, H_.adminStats, 'admin'],
+  ['GET', /^\/api\/admin\/users$/, H_.adminUsers, 'admin'],
+  ['GET', /^\/api\/admin\/users\/(?<id>\d+)$/, H_.adminUser, 'admin'],
+  ['POST', /^\/api\/admin\/users\/(?<id>\d+)\/flag$/, H_.adminFlag, 'admin'],
+  ['POST', /^\/api\/admin\/users\/(?<id>\d+)\/reset-devices$/, H_.adminResetDevices, 'admin'],
+  ['POST', /^\/api\/admin\/users\/(?<id>\d+)\/adjust$/, H_.adminAdjust, 'admin'],
+  ['POST', /^\/api\/admin\/users\/(?<id>\d+)\/message$/, H_.adminMessage, 'admin'],
+  ['GET', /^\/api\/admin\/tasks$/, H_.adminTasks, 'admin'],
+  ['POST', /^\/api\/admin\/tasks$/, H_.adminTaskCreate, 'admin'],
+  ['POST', /^\/api\/admin\/tasks\/(?<key>[a-z]+\d+)$/, H_.adminTaskUpdate, 'admin'],
+  ['POST', /^\/api\/admin\/tasks\/(?<key>[a-z]+\d+)\/delete$/, H_.adminTaskDelete, 'admin'],
+  ['POST', /^\/api\/admin\/settings$/, H_.adminSettings, 'admin'],
+  ['POST', /^\/api\/admin\/check-channel$/, H_.adminCheckChannel, 'admin'],
+  ['GET', /^\/api\/admin\/activity$/, H_.adminActivity, 'admin'],
+  ['GET', /^\/api\/admin\/log$/, H_.adminLog, 'admin'],
   ['GET', /^\/api\/admin\/withdrawals$/, H_.adminWithdrawals, 'admin'],
   ['POST', /^\/api\/admin\/withdrawals\/(?<id>\d+)$/, H_.adminWithdrawalAction, 'admin'],
   ['POST', /^\/api\/admin\/users\/(?<id>\d+)\/ban$/, H_.adminBan, 'admin'],
@@ -689,7 +914,11 @@ async function handleApi(req, res, url) {
   const ctx = { req, res, ip, query: url.searchParams, params: re.exec(url.pathname).groups || {}, body: method === 'POST' ? await readBody(req) : {} };
 
   if (auth === 'admin') {
-    if (!cfg.adminToken || !safeEq(String(req.headers['x-admin-token'] || ''), cfg.adminToken)) fail(401, 'UNAUTHORIZED');
+    if (cfg.adminIps.length && !cfg.adminIps.includes(ip)) fail(403, 'FORBIDDEN');
+    if (!cfg.adminToken || !safeEq(String(req.headers['x-admin-token'] || ''), cfg.adminToken)) {
+      if (limited(`admfail:${ip}`, 10, 10 * 60000)) fail(429, 'RATE_LIMIT'); // max 10 wrong tokens / 10 min / IP
+      fail(401, 'UNAUTHORIZED');
+    }
   } else if (auth === 'user') {
     const dev = String(req.headers['x-device'] || '').slice(0, 100);
     const fp = String(req.headers['x-fp'] || '').slice(0, 200);
@@ -716,6 +945,7 @@ function serveStatic(req, res, url) {
   let rel = decodeURIComponent(url.pathname);
   if (rel.includes('\0')) { res.writeHead(400); return res.end(); }
   if (rel === '/') rel = '/index.html';
+  if (rel === '/admin') rel = '/admin.html';
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
   if (!file.startsWith(PUBLIC_DIR + path.sep) || path.basename(file).startsWith('.')) { res.writeHead(404); return res.end('Not found'); }
   fs.readFile(file, (err, data) => {
@@ -774,7 +1004,7 @@ async function recheckSubs() {
   rechecking = true;
   try {
     for (const [key, def] of Object.entries(TASKS)) {
-      if (def.type !== 'sub' || !def.channel) continue;
+      if (def.type !== 'sub' || !def.channel || !def.enabled) continue;
       const rows = q('SELECT user_id, paid FROM task_limits WHERE task=? AND done=1 AND last_check<=? ORDER BY last_check ASC LIMIT 100').all(key, now() - RULES.subRecheckSec * 1000);
       for (const r of rows) {
         let member;
