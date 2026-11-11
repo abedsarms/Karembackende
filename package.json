@@ -6,8 +6,8 @@
   "main": "server.js",
   "engines": { "node": ">=22.13" },
   "scripts": {
-    "start": "node server.js",
+    "start": "node start.js",
     "dev": "DEV_MODE=1 node server.js",
-    "test": "node test/smoke.js"
+    "test": "node test/smoke.js && node test/backup.js"
   }
 }

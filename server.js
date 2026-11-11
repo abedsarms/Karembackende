@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+const backup = require('./backup');
 
 // ───────────────────────── config ─────────────────────────
 function loadDotEnv() {
@@ -103,6 +104,13 @@ const COMMISSION_KINDS = ['ad', 'sub', 'daily'];
 // ───────────────────────── database ─────────────────────────
 fs.mkdirSync(path.dirname(cfg.dbPath), { recursive: true });
 const db = new DatabaseSync(cfg.dbPath);
+// Telegram backup (keeps data alive on hosts with a wiped disk, e.g. Render free). Restore itself runs in start.js.
+const restoredInfo = globalThis.__KAREM_RESTORED || { status: 'disabled' };
+const backupSvc = backup.createService({
+  db, dbPath: cfg.dbPath, token: cfg.botToken, chat: env.BACKUP_CHAT_ID || '', passphrase: env.BACKUP_PASSPHRASE || '', api: cfg.tgApi,
+  minGapSec: num(env.BACKUP_MIN_GAP_SEC, 60), everySec: num(env.BACKUP_EVERY_SEC, 300),
+  restored: restoredInfo, initialMessageId: restoredInfo.messageId, log: (...a) => console.log(new Date().toISOString(), ...a),
+});
 db.exec(`
 PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS users(
@@ -647,6 +655,7 @@ H_.adminStats = () => {
     approvedWithdrawals: q("SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM withdrawals WHERE status='approved'").get(),
     new24h: q('SELECT COUNT(*) c FROM users WHERE created_at>?').get(t - day).c,
     active24h: q('SELECT COUNT(*) c FROM users WHERE last_seen>?').get(t - day).c,
+    backup: backupSvc.status(),
     online15m: q('SELECT COUNT(*) c FROM users WHERE last_seen>?').get(t - 15 * 60000).c,
     banned: q('SELECT COUNT(*) c FROM users WHERE banned=1').get().c,
     flagged: q('SELECT COUNT(*) c FROM users WHERE flagged=1').get().c,
@@ -783,6 +792,15 @@ H_.adminCheckChannel = async (c) => {
     return { ok: true, title: chat.result.title || '', type: chat.result.type, botStatus: status, botIsAdmin: ['administrator', 'creator'].includes(status), members: cnt.ok ? cnt.result : null };
   } catch { fail(502, 'TG_ERROR'); }
 };
+H_.adminBackup = () => backupSvc.status();
+H_.adminBackupRun = async () => { const r = await backupSvc.run(true); logAdmin('backup_run', '', r.ok ? 'ok' : r.error); return { ...r, status: backupSvc.status() }; };
+H_.adminBackupVerify = async () => { const r = await backupSvc.verify(); logAdmin('backup_verify', '', r.ok ? 'ok' : r.error); return r; };
+H_.adminBackupDownload = (c) => {
+  const buf = backupSvc.exportDb(); logAdmin('backup_download', '', `${buf.length} bytes`);
+  c.res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="karem-${new Date().toISOString().slice(0, 10)}.db"`, 'Cache-Control': 'no-store', ...SEC_HEADERS });
+  c.res.end(buf);
+  return RAW;
+};
 H_.adminLog = () => ({ items: q('SELECT * FROM admin_log ORDER BY id DESC LIMIT 100').all() });
 const adminUserId = (c) => { const id = +c.params.id; if (!getUser(id)) fail(404, 'NOT_FOUND'); return id; };
 H_.adminFlag = (c) => { const id = adminUserId(c); const f = c.body.flagged ? 1 : 0; q('UPDATE users SET flagged=? WHERE id=?').run(f, id); logAdmin(f ? 'flag' : 'unflag', String(id)); return { ok: true, flagged: f }; };
@@ -848,6 +866,7 @@ const SEC_HEADERS = {
   'Content-Security-Policy': "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors https://web.telegram.org https://webk.telegram.org https://webz.telegram.org https://*.telegram.org; base-uri 'none'; form-action 'none'",
 };
 
+const RAW = Symbol('raw'); // handler already wrote the response itself
 function send(res, status, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...SEC_HEADERS });
@@ -900,6 +919,10 @@ const ROUTES = [
   ['POST', /^\/api\/admin\/check-channel$/, H_.adminCheckChannel, 'admin'],
   ['GET', /^\/api\/admin\/activity$/, H_.adminActivity, 'admin'],
   ['GET', /^\/api\/admin\/log$/, H_.adminLog, 'admin'],
+  ['GET', /^\/api\/admin\/backup$/, H_.adminBackup, 'admin'],
+  ['POST', /^\/api\/admin\/backup\/run$/, H_.adminBackupRun, 'admin'],
+  ['POST', /^\/api\/admin\/backup\/verify$/, H_.adminBackupVerify, 'admin'],
+  ['GET', /^\/api\/admin\/backup\/download$/, H_.adminBackupDownload, 'admin'],
   ['GET', /^\/api\/admin\/withdrawals$/, H_.adminWithdrawals, 'admin'],
   ['POST', /^\/api\/admin\/withdrawals\/(?<id>\d+)$/, H_.adminWithdrawalAction, 'admin'],
   ['POST', /^\/api\/admin\/users\/(?<id>\d+)\/ban$/, H_.adminBan, 'admin'],
@@ -925,7 +948,9 @@ async function handleApi(req, res, url) {
     ctx.user = authenticate(req, { ip, deviceHash: dev ? sha(dev) : '', fpHash: fp ? sha('fp:' + fp) : '' });
     if (method === 'POST' && limited(`u:${ctx.user.id}`, num(env.USER_RATE_PER_MIN, 40), 60000)) fail(429, 'RATE_LIMIT');
   }
-  return handler(ctx);
+  const out = await handler(ctx);
+  if (method === 'POST') backupSvc.request(); // any write → schedule a (debounced) backup
+  return out;
 }
 
 function redirectClick(req, res, url) {
@@ -959,7 +984,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://x');
     if (url.pathname === '/healthz') return send(res, 200, { ok: true });
-    if (url.pathname.startsWith('/api/')) return send(res, 200, await handleApi(req, res, url));
+    if (url.pathname.startsWith('/api/')) { const out = await handleApi(req, res, url); return out === RAW ? undefined : send(res, 200, out); }
     if (url.pathname.startsWith('/r/') && req.method === 'GET') return redirectClick(req, res, url);
     return serveStatic(req, res, url);
   } catch (e) {
@@ -974,6 +999,9 @@ server.requestTimeout = 30000;
 async function onUpdate(up) {
   const m = up.message;
   if (!m || !m.text || !m.from || m.chat.type !== 'private') return;
+  if (m.forward_origin && m.forward_origin.chat && m.forward_origin.chat.type === 'channel') { // helper to find BACKUP_CHAT_ID
+    await tg('sendMessage', { chat_id: m.chat.id, text: `Channel ID / آیدی کانال:\n${m.forward_origin.chat.id}` }); return;
+  }
   if (!m.text.startsWith('/start')) return;
   const payload = (m.text.split(/\s+/)[1] || '');
   const rm = /^ref_(\d{1,15})$/.exec(payload);
@@ -1042,6 +1070,7 @@ function maintenance() {
 server.listen(cfg.port, async () => {
   log(`CAReM listening on :${cfg.port} (devMode=${cfg.devMode})`);
   maintenance();
+  backupSvc.start();
   setInterval(maintenance, H).unref();
   setInterval(recheckSubs, Math.max(1, Math.min(300, RULES.subRecheckSec)) * 1000).unref();
   if (cfg.botToken) {
@@ -1052,6 +1081,14 @@ server.listen(cfg.port, async () => {
   }
 });
 
-function shutdown() { stopping = true; server.close(() => { try { db.close(); } catch { /* ignore */ } process.exit(0); }); setTimeout(() => process.exit(0), 3000).unref(); }
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return; shuttingDown = true; stopping = true;
+  const hard = setTimeout(() => process.exit(0), 15000); hard.unref();
+  server.close(); // stop accepting new connections
+  try { await backupSvc.flush(10000); } catch (e) { log('final backup failed', e.message); } // last snapshot before the disk disappears
+  try { db.close(); } catch { /* ignore */ }
+  process.exit(0);
+}
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 process.on('unhandledRejection', (e) => log('unhandledRejection', e));
