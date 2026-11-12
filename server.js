@@ -111,7 +111,7 @@ const TASK_DEFAULTS = {
 };
 const TASKS = {}; // key -> { type, reward, url, channel, click, postback, enabled }  (mutable, loaded from DB)
 // the wheel has exactly ONE ad: shown after the spin, before the prize is paid
-const SETTINGS = { spinAdUrl: httpsOrEmpty(env.SPIN_CLAIM_AD_URL) || httpsOrEmpty(env.SPIN_AD_URL) }; // overridden by DB
+const SETTINGS = { spinAdUrl: httpsOrEmpty(env.SPIN_CLAIM_AD_URL) || httpsOrEmpty(env.SPIN_AD_URL), payUrlStars: '{profile}', payUrlGift: '{profile}' }; // overridden by DB
 const EARN_KINDS = ['ad', 'sub', 'daily', 'ref_bonus', 'ref_commission', 'captcha'];
 const COMMISSION_KINDS = ['ad', 'sub', 'daily'];
 
@@ -184,6 +184,8 @@ addColumn('tasks', 'reward_type', "TEXT NOT NULL DEFAULT 'stars'");
 addColumn('task_limits', 'paid', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('task_limits', 'paid_coins', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('sessions', 'ptype', "TEXT NOT NULL DEFAULT 'stars'");
+addColumn('withdrawals', 'gift_id', "TEXT NOT NULL DEFAULT ''");
+addColumn('withdrawals', 'gift_name', "TEXT NOT NULL DEFAULT ''");
 addColumn('lottery_boxes', 'opened', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('task_limits', 'last_check', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('sessions', 'clicked', 'INTEGER NOT NULL DEFAULT 0');
@@ -273,6 +275,8 @@ function loadTasks() {
   }
   const st = Object.fromEntries(q('SELECT key, value FROM settings').all().map((r) => [r.key, r.value]));
   if (st.spinAdUrl !== undefined) SETTINGS.spinAdUrl = st.spinAdUrl;
+  if (st.payUrlStars) SETTINGS.payUrlStars = st.payUrlStars;
+  if (st.payUrlGift) SETTINGS.payUrlGift = st.payUrlGift;
   if (st.perTaskLimit !== undefined && Number.isSafeInteger(+st.perTaskLimit) && +st.perTaskLimit > 0) RULES.perTaskLimit = +st.perTaskLimit;
   if (st.spinEarn !== undefined && Number.isSafeInteger(+st.spinEarn) && +st.spinEarn >= 1) RULES.spinEarn = +st.spinEarn;
   if (st.wheel) { try { const w = sanitizeWheel(JSON.parse(st.wheel)); WHEEL.length = 0; WHEEL.push(...w); } catch { /* keep defaults */ } }
@@ -439,7 +443,7 @@ function buildState(uid) {
   }
   const refs = q('SELECT COUNT(*) c, COALESCE(SUM(ref_rewarded),0) a FROM users WHERE referrer_id=?').get(uid);
   const { rank, score } = weeklyRank(uid, t);
-  const wd = q('SELECT id,amount,type,status,created_at FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 5').all(uid);
+  const wd = q('SELECT id,amount,type,status,created_at,gift_name FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 5').all(uid);
   return {
     now: t,
     user: { id: u.id, name: u.first_name || u.username || String(u.id) },
@@ -813,23 +817,60 @@ H_.spinClaim = (c) => tx(() => {
   return { prize: s.prize, state: buildState(c.user.id) };
 });
 
-H_.withdraw = (c) => tx(() => {
-  const u = getUser(c.user.id);
-  const amount = c.body.amount_m;
-  const type = c.body.type;
-  if (!Number.isSafeInteger(amount) || amount <= 0 || !['gift', 'balance'].includes(type)) fail(400, 'BAD_AMOUNT');
-  if (amount < RULES.minWithdraw) fail(400, 'MIN_WITHDRAW');
-  if (u.flagged) fail(403, 'BANNED');
-  if (amount > u.balance) fail(400, 'INSUFFICIENT');
-  const pend = q("SELECT COUNT(*) c FROM withdrawals WHERE user_id=? AND status='pending'").get(u.id).c;
-  if (pend >= RULES.maxPendingWithdrawals) fail(429, 'TOO_MANY_PENDING');
-  q('UPDATE users SET balance=balance-? WHERE id=?').run(amount, u.id); // CHECK(balance>=0) is the last line of defence
-  const t = now();
-  const r = q('INSERT INTO withdrawals(user_id,amount,type,created_at,updated_at) VALUES(?,?,?,?,?)').run(u.id, amount, type, t, t);
-  q('INSERT INTO ledger(user_id,kind,amount,ref,created_at) VALUES(?,?,?,?,?)').run(u.id, 'withdraw', -amount, String(r.lastInsertRowid), t);
-  queueMicrotask(() => cfg.adminIds.forEach((a) => notify(a, `💸 New withdrawal #${r.lastInsertRowid}: ${amount / 1000} ⭐ (${type}) from user ${u.id}`)));
-  return { id: Number(r.lastInsertRowid), state: buildState(u.id) };
-});
+// Telegram gifts the user may choose from. Live list from the Bot API (getAvailableGifts), cached 1 h; built-in list as a fallback.
+const GIFT_FALLBACK = [['heart', '💝', 15], ['bear', '🧸', 15], ['gift', '🎁', 25], ['rose', '🌹', 25], ['cake', '🎂', 50], ['bouquet', '💐', 50], ['rocket', '🚀', 50], ['champagne', '🍾', 50], ['trophy', '🏆', 100], ['ring', '💍', 100], ['diamond', '💎', 100]]
+  .map(([id, emoji, stars]) => ({ id, emoji, stars }));
+let giftCache = { at: 0, list: GIFT_FALLBACK };
+async function giftCatalog() {
+  if (now() - giftCache.at < H && giftCache.at) return giftCache.list;
+  let list = GIFT_FALLBACK;
+  if (cfg.botToken) {
+    try {
+      const r = await tg('getAvailableGifts', {});
+      const l = ((r && r.gifts) || []).filter((g) => g && g.id && Number.isSafeInteger(g.star_count) && g.star_count > 0 && !g.remaining_count && !g.total_count)
+        .map((g) => ({ id: String(g.id), emoji: (g.sticker && g.sticker.emoji) || '🎁', stars: g.star_count })); // limited-edition gifts (sold out / rare) are left out
+      if (l.length) list = l.sort((x, y) => x.stars - y.stars);
+    } catch (e) { log('getAvailableGifts failed', e.message); }
+  }
+  giftCache = { at: now(), list }; return list;
+}
+H_.gifts = async () => ({ gifts: await giftCatalog(), minWithdraw: RULES.minWithdraw });
+H_.withdraw = async (c) => {
+  const type = c.body.type; let amount = c.body.amount_m; let gift = null;
+  if (type === 'gift') {
+    gift = (await giftCatalog()).find((g) => g.id === String(c.body.gift_id || '')); if (!gift) fail(400, 'BAD_GIFT');
+    amount = gift.stars * 1000; // a gift has a fixed price
+  }
+  return tx(() => {
+    const u = getUser(c.user.id);
+    if (!Number.isSafeInteger(amount) || amount <= 0 || !['gift', 'balance'].includes(type)) fail(400, 'BAD_AMOUNT');
+    if (amount < RULES.minWithdraw) fail(400, 'MIN_WITHDRAW');
+    if (u.flagged) fail(403, 'BANNED');
+    if (amount > u.balance) fail(400, 'INSUFFICIENT');
+    const pend = q("SELECT COUNT(*) c FROM withdrawals WHERE user_id=? AND status='pending'").get(u.id).c;
+    if (pend >= RULES.maxPendingWithdrawals) fail(429, 'TOO_MANY_PENDING');
+    q('UPDATE users SET balance=balance-? WHERE id=?').run(amount, u.id); // CHECK(balance>=0) is the last line of defence
+    const t = now(); const gname = gift ? `${gift.emoji} ${gift.stars}⭐` : '';
+    const r = q('INSERT INTO withdrawals(user_id,amount,type,created_at,updated_at,gift_id,gift_name) VALUES(?,?,?,?,?,?,?)').run(u.id, amount, type, t, t, gift ? gift.id : '', gname);
+    q('INSERT INTO ledger(user_id,kind,amount,ref,created_at) VALUES(?,?,?,?,?)').run(u.id, 'withdraw', -amount, String(r.lastInsertRowid), t);
+    const wid = Number(r.lastInsertRowid); const uname = u.username || '';
+    queueMicrotask(() => cfg.adminIds.forEach((a) => notifyAdminWithdrawal(a, { id: wid, user_id: u.id, username: uname, amount, type, gift_name: gname })));
+    return { id: wid, state: buildState(u.id) };
+  });
+};
+/** where the admin is sent to pay: the user's profile by default (settings templates: {uid} {username} {profile}) */
+function payUrl(w) {
+  const profile = w.username ? `https://t.me/${w.username}` : `tg://user?id=${w.user_id}`;
+  const tpl = w.type === 'gift' ? SETTINGS.payUrlGift : SETTINGS.payUrlStars;
+  return String(tpl || '{profile}').replaceAll('{profile}', profile).replaceAll('{uid}', String(w.user_id)).replaceAll('{username}', w.username || '');
+}
+async function notifyAdminWithdrawal(adminId, w) {
+  if (!cfg.botToken) return;
+  const what = w.type === 'gift' ? `🎁 gift ${w.gift_name}` : `⭐ Stars`;
+  const text = `💸 New withdrawal #${w.id}: ${w.amount / 1000} ⭐ — ${what} — user ${w.user_id}${w.username ? ' @' + w.username : ''}\nاز پنل مدیریت «ارسال پاداش» را بزنید، پاداش را بفرستید و سپس «تایید» کنید.`;
+  try { await tg('sendMessage', { chat_id: adminId, text, reply_markup: { inline_keyboard: [[{ text: '💸 ارسال پاداش / Send reward', url: payUrl(w) }]] } }); }
+  catch { notify(adminId, text); } // e.g. the link type is refused in a button → plain message
+}
 
 H_.league = (c) => {
   const t = now(); const ws = weekStart(t);
@@ -849,7 +890,8 @@ H_.adminWithdrawals = (c) => {
   const st = c.query.get('status') || 'pending';
   const where = st === 'all' ? '' : 'WHERE w.status=?';
   const sql = `SELECT w.*, u.username, u.first_name, u.balance, u.flagged, u.banned FROM withdrawals w JOIN users u ON u.id=w.user_id ${where} ORDER BY w.id ${st === 'pending' ? 'ASC' : 'DESC'} LIMIT 200`;
-  return { items: st === 'all' ? q(sql).all() : q(sql).all(st) };
+  const items = (st === 'all' ? q(sql).all() : q(sql).all(st)).map((w) => ({ ...w, pay_url: payUrl(w) }));
+  return { items };
 };
 H_.adminWithdrawalAction = (c) => {
   const id = +c.params.id; const action = c.body.action;
@@ -966,7 +1008,7 @@ H_.adminTasks = (c) => {
     sessions24: (sess[key] || {}).n || 0, clicks24: (sess[key] || {}).c || 0, subscribed: subs[key] || 0,
   }));
   return {
-    items, settings: { spinAdUrl: SETTINGS.spinAdUrl, perTaskLimit: RULES.perTaskLimit }, botConfigured: !!cfg.botToken,
+    items, settings: { spinAdUrl: SETTINGS.spinAdUrl, perTaskLimit: RULES.perTaskLimit, payUrlStars: SETTINGS.payUrlStars, payUrlGift: SETTINGS.payUrlGift }, botConfigured: !!cfg.botToken,
     postbackTemplate: cfg.postbackSecret ? `${baseUrl(c.req)}/api/postback?secret=${cfg.postbackSecret}&sid={sid}` : '',
   };
 };
@@ -1010,7 +1052,7 @@ H_.adminTaskCreate = (c) => tx(() => {
 });
 H_.adminTaskUpdate = (c) => tx(() => {
   const key = c.params.key; const cur = TASKS[key]; if (!cur) fail(404, 'NOT_FOUND');
-  if (c.body.channel !== undefined && String(c.body.channel).trim() !== cur.channel) fail(400, 'CHANNEL_LOCKED'); // changing it would make the re-check punish everyone who joined the old channel
+  if (cur.channel && c.body.channel !== undefined && String(c.body.channel).trim() !== cur.channel) fail(400, 'CHANNEL_LOCKED'); // changing it would make the re-check punish everyone who joined the old channel
   const d = readTaskFields(c.body, cur); TASKS[key] = d; persistTask(key);
   logAdmin('task_update', key, JSON.stringify({ reward: d.rewardType === 'coins' ? d.reward + ' coins' : d.reward / 1000, url: d.url, enabled: d.enabled, click: d.click, postback: d.postback }).slice(0, 200));
   return { ok: true };
@@ -1022,6 +1064,10 @@ H_.adminTaskDelete = (c) => tx(() => {
 });
 H_.adminSettings = (c) => {
   if (c.body.spinAdUrl !== undefined) { const u = String(c.body.spinAdUrl).trim(); if (u && !isHttps(u)) fail(400, 'BAD_URL'); SETTINGS.spinAdUrl = u; saveSetting('spinAdUrl', u); }
+  for (const k of ['payUrlStars', 'payUrlGift']) {
+    if (c.body[k] === undefined) continue; const u = String(c.body[k]).trim() || '{profile}';
+    if (!/^(https:\/\/t\.me\/|tg:\/\/)/i.test(u.replace('{profile}', 'https://t.me/x'))) fail(400, 'BAD_URL'); SETTINGS[k] = u; saveSetting(k, u);
+  }
   if (c.body.perTaskLimit !== undefined) { const n = c.body.perTaskLimit; if (!Number.isSafeInteger(n) || n < 1 || n > 1000) fail(400, 'BAD_AMOUNT'); RULES.perTaskLimit = n; saveSetting('perTaskLimit', n); }
   logAdmin('settings', null, JSON.stringify({ spinAdUrl: SETTINGS.spinAdUrl, perTaskLimit: RULES.perTaskLimit }).slice(0, 200));
   return { ok: true };
@@ -1198,6 +1244,7 @@ const ROUTES = [
   ['POST', /^\/api\/spin$/, H_.spin, 'user'],
   ['POST', /^\/api\/spin\/claim\/start$/, H_.spinClaimStart, 'user'],
   ['POST', /^\/api\/spin\/claim$/, H_.spinClaim, 'user'],
+  ['GET', /^\/api\/gifts$/, H_.gifts, 'user'],
   ['POST', /^\/api\/withdraw$/, H_.withdraw, 'user'],
   ['GET', /^\/api\/league$/, H_.league, 'user'],
   ['GET', /^\/api\/postback$/, H_.postback, 'none'],
