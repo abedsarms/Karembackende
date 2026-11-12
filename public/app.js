@@ -507,17 +507,29 @@
   function renderWithdrawals() {
     const box = $('wdList'); box.replaceChildren();
     S.withdrawals.forEach((w) => {
-      const row = el('div', 'wd-row'); row.append(el('span', '', fmt(w.amount) + ' ⭐ · ' + new Date(w.created_at).toLocaleDateString(lang)), el('span', 'st-' + w.status, tr('st_' + w.status)));
+      const row = el('div', 'wd-row'); row.append(el('span', '', (w.gift_name ? w.gift_name + ' · ' : '') + fmt(w.amount) + ' ⭐ · ' + new Date(w.created_at).toLocaleDateString(lang)), el('span', 'st-' + w.status, tr('st_' + w.status)));
       box.append(row);
     });
   }
+  // gift payout: the user picks the Telegram gift; its price becomes the amount
+  let giftList = null;
+  async function loadGifts() {
+    if (giftList) return; const sel = $('giftSelect');
+    try { const r = await api('/api/gifts'); giftList = r.gifts.filter((g) => g.stars * 1000 >= S.config.minWithdraw); } catch { giftList = []; }
+    sel.replaceChildren(...giftList.map((g) => { const o = el('option', '', `${g.emoji}  ${g.stars} ⭐`); o.value = g.id; return o; }));
+    syncPayout();
+  }
+  function syncPayout() {
+    const gift = $('payoutType').value === 'gift'; $('giftField').classList.toggle('hidden', !gift); const amt = $('withdrawAmount'); amt.readOnly = gift;
+    if (gift) { const g = (giftList || []).find((x) => x.id === $('giftSelect').value); amt.value = g ? String(g.stars) : ''; if (!giftList) loadGifts(); }
+  }
   async function requestWithdrawal() {
-    const sm = $('statusMsg'); const v = parseFloat($('withdrawAmount').value);
+    const sm = $('statusMsg'); const gift = $('payoutType').value === 'gift'; const v = parseFloat($('withdrawAmount').value);
     const amount_m = Math.round(v * 1000);
     if (!Number.isFinite(v) || amount_m < S.config.minWithdraw) { sm.className = 'err'; sm.textContent = tr('e_MIN_WITHDRAW'); return; }
     try {
-      const r = await api('/api/withdraw', { amount_m, type: $('payoutType').value });
-      applyState(r.state); sm.className = 'ok'; sm.textContent = tr('wdOk', { n: fmt(amount_m) }); $('withdrawAmount').value = ''; haptic('success');
+      const r = await api('/api/withdraw', gift ? { type: 'gift', gift_id: $('giftSelect').value } : { amount_m, type: 'balance' });
+      applyState(r.state); sm.className = 'ok'; sm.textContent = tr('wdOk', { n: fmt(amount_m) }); $('withdrawAmount').value = ''; syncPayout(); haptic('success');
     } catch (e) { sm.className = 'err'; sm.textContent = errText(e); }
   }
 
@@ -574,6 +586,8 @@
     $('spinBtn').addEventListener('click', spinWheel);
     $('spinClaimBtn').addEventListener('click', claimSpinPrize);
     $('withdrawBtn').addEventListener('click', requestWithdrawal);
+    $('payoutType').addEventListener('change', syncPayout);
+    $('giftSelect').addEventListener('change', syncPayout);
     $('unlockBtn').addEventListener('click', unlockBoxes);
     $('convertBtn').addEventListener('click', showConvert);
     $('lastBtn').addEventListener('click', showLast);

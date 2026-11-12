@@ -232,3 +232,7 @@ Object.assign(window.I18N.ru, {
     e_NO_COINS: '❌ Недостаточно монет.', e_PENDING_BOX: '❌ Сначала выберите один из открытых боксов.', e_NO_BOX: '❌ Нет открытого бокса.', e_EVENT_ENDED: '❌ Событие завершено, идёт розыгрыш.', e_DAILY_LIMIT: '❌ Достигнут дневной лимит боксов.',
     e_ALL_CAPPED: '❌ Достигнут лимит билетов.', e_NOT_ENOUGH: '❌ Недостаточно частей.', e_DISABLED: '❌ Функция отключена.', e_FLAGGED: '❌ Недоступно для этого аккаунта.', e_BAD_TIER: '❌ Неверно.',
 });
+Object.assign(window.I18N.en, {giftPick: 'Choose your gift:', e_BAD_GIFT: '❌ This gift is not available.',});
+Object.assign(window.I18N.fa, {giftPick: 'گیفت مورد نظر خود را انتخاب کنید:', e_BAD_GIFT: '❌ این گیفت در دسترس نیست.',});
+Object.assign(window.I18N.ar, {giftPick: 'اختر الهدية:', e_BAD_GIFT: '❌ هذه الهدية غير متاحة.',});
+Object.assign(window.I18N.ru, {giftPick: 'Выберите подарок:', e_BAD_GIFT: '❌ Этот подарок недоступен.',});

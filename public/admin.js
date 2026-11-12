@@ -192,7 +192,7 @@
       body.append(table(['آیدی', 'کاربر', 'ارتباط', 'بن'], rel.map((x) => [num(String(x.id)), userLabel(x), tag(x.why, 'gold'), x.banned ? tag('بن', 'red') : '—']), open(rel)));
     }
     body.append(el('h2', '', 'برداشت‌ها'));
-    body.append(table(['#', 'مقدار ⭐', 'نوع', 'وضعیت', 'تاریخ'], d.withdrawals.map((w) => [num(String(w.id)), num(stars(w.amount)), w.type === 'gift' ? 'گیفت' : 'بالانس', w.status, when(w.created_at)])));
+    body.append(table(['#', 'مقدار ⭐', 'نوع', 'وضعیت', 'تاریخ'], d.withdrawals.map((w) => [num(String(w.id)), num(stars(w.amount)), w.type === 'gift' ? 'گیفت ' + (w.gift_name || '') : 'استارز', w.status, when(w.created_at)])));
     body.append(el('h2', '', 'جمع تراکنش‌ها به تفکیک نوع'));
     body.append(table(['نوع', 'تعداد', 'مجموع ⭐'], d.totals.map((t) => [KIND[t.kind] || t.kind, num(String(t.n)), signed(t.total)])));
     body.append(el('h2', '', 'زیرمجموعه‌ها (' + d.referrals.length + ')'));
@@ -212,13 +212,15 @@
     const rows = r.items.map((w) => {
       const acts = el('span');
       if (w.status === 'pending') {
-        acts.append(
-          btn('✅ تایید', 'good', async () => { if (!confirm(`برداشت #${w.id} (${stars(w.amount)} ⭐) تایید شود؟\nبه یاد داشته باشید پرداخت واقعی را خودتان انجام دهید.`)) return; if (await guard(() => api('/api/admin/withdrawals/' + w.id, { action: 'approve' }))) { toast('تایید شد', 'good'); loadWd(); } }),
+        const pay = el('a', 'btn small warn', '💸 ارسال پاداش'); pay.href = w.pay_url; pay.target = '_blank'; pay.rel = 'noopener';
+        pay.title = w.type === 'gift' ? `گیفت ${w.gift_name} را برای این کاربر بفرستید` : `${stars(w.amount)} ⭐ برای این کاربر ارسال شود`;
+        acts.append(pay,
+          btn('✅ تایید', 'good', async () => { if (!confirm(`برداشت #${w.id} (${stars(w.amount)} ⭐) تایید شود؟\nفقط بعد از ارسال واقعی پاداش (دکمه‌ی «ارسال پاداش») تایید کنید؛ به کاربر پیام داده می‌شود.`)) return; if (await guard(() => api('/api/admin/withdrawals/' + w.id, { action: 'approve' }))) { toast('تایید شد', 'good'); loadWd(); } }),
           btn('❌ رد', 'bad', async () => { const note = prompt('دلیل رد (اختیاری):', ''); if (note === null) return; if (await guard(() => api('/api/admin/withdrawals/' + w.id, { action: 'reject', note }))) { toast('رد شد و موجودی برگشت', 'good'); loadWd(); } }));
       } else acts.textContent = w.note || '—';
       const flags = el('span'); if (w.flagged) flags.append(tag('مشکوک', 'gold')); if (w.banned) flags.append(tag('بن', 'red'));
       const who = btn(userLabel(w), '', async () => openUser(w.user_id));
-      return [num(String(w.id)), who, flags, num(stars(w.amount), 'gold'), w.type === 'gift' ? 'گیفت' : 'بالانس', num(stars(w.balance)), { pending: 'در انتظار', approved: 'تایید شده', rejected: 'رد شده' }[w.status], when(w.created_at), acts];
+      return [num(String(w.id)), who, flags, num(stars(w.amount), 'gold'), w.type === 'gift' ? 'گیفت ' + (w.gift_name || '') : 'استارز', num(stars(w.balance)), { pending: 'در انتظار', approved: 'تایید شده', rejected: 'رد شده' }[w.status], when(w.created_at), acts];
     });
     $('wdTable').replaceChildren(table(['#', 'کاربر', 'هشدار', 'مقدار ⭐', 'نوع', 'موجودی فعلی', 'وضعیت', 'تاریخ', 'اقدام'], rows));
     if (st === 'pending') { const b = $('wdBadge'); b.textContent = r.items.length; b.classList.toggle('hidden', !r.items.length); }
@@ -238,14 +240,14 @@
         num(`${t.claims24} / ${t.claims}`), t.click ? num(`${t.clicks24} از ${t.sessions24}`) : '—', num(t.rewardType === 'coins' ? t.paid + ' 🪙' : stars(t.paid))]), (i) => openTask(ads[i])));
     $('subsTable').replaceChildren(table(['#', 'وضعیت', 'پاداش', 'کانال', 'لینک عضویت', 'عضو فعلی (از ثبت‌شده‌ها)', 'پرداختی'],
       subs.map((t) => [num(t.key), state(t), num(rewardTxt(t), 'gold'), num(t.channel), shortUrl(t.url), num(String(t.subscribed)), num(t.rewardType === 'coins' ? t.paid + ' 🪙' : stars(t.paid))]), (i) => openTask(subs[i])));
-    $('setLimit').value = r.settings.perTaskLimit; $('setSpinAd').value = r.settings.spinAdUrl || '';
+    $('setLimit').value = r.settings.perTaskLimit; $('setSpinAd').value = r.settings.spinAdUrl || ''; $('setPayStars').value = r.settings.payUrlStars || '{profile}'; $('setPayGift').value = r.settings.payUrlGift || '{profile}';
     $('adsHint').textContent = 'برای ویرایش، روی هر ردیف کلیک کنید. تغییرات تا حدود یک دقیقه بعد در مینی‌اپ کاربران اعمال می‌شود. تسک غیرفعال برای کاربران مخفی می‌شود.';
   }
   $('addAd').addEventListener('click', () => openTask(null, 'ad'));
   $('addSub').addEventListener('click', () => openTask(null, 'sub'));
   $('settingsForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (await guard(() => api('/api/admin/settings', { perTaskLimit: parseInt($('setLimit').value, 10), spinAdUrl: $('setSpinAd').value.trim() }))) { toast('ذخیره شد', 'good'); loadAds(); }
+    if (await guard(() => api('/api/admin/settings', { perTaskLimit: parseInt($('setLimit').value, 10), spinAdUrl: $('setSpinAd').value.trim(), payUrlStars: $('setPayStars').value.trim(), payUrlGift: $('setPayGift').value.trim() }))) { toast('ذخیره شد', 'good'); loadAds(); }
   });
 
   function openTask(t, type) {
@@ -266,8 +268,8 @@
     field(isSub ? 'لینک عضویت (https://t.me/…)' : 'لینک تبلیغ (از شبکه‌ی تبلیغاتی). می‌توانید {sid} و {uid} را در لینک بگذارید', url);
     let channel = null; let res = null;
     if (isSub) {
-      channel = el('input'); channel.dir = 'ltr'; channel.placeholder = '@your_channel'; channel.value = t ? t.channel : ''; channel.required = true; channel.readOnly = !isNew;
-      field(isNew ? 'کانال (@username یا آیدی عددی -100…)' : 'کانال (بعد از ثبت قابل تغییر نیست)', channel);
+      channel = el('input'); channel.dir = 'ltr'; channel.placeholder = '@your_channel'; channel.value = t ? t.channel : ''; channel.required = true; channel.readOnly = !isNew && !!t.channel;
+      field(isNew || !t.channel ? 'کانال (@username یا آیدی عددی -100…) — هنوز ثبت نشده، همین‌جا وارد کنید' : 'کانال (بعد از ثبت قابل تغییر نیست)', channel);
       res = el('div', 'checkres'); const cb = el('button', 'btn small', '🔍 بررسی کانال و دسترسی بات'); cb.type = 'button';
       cb.addEventListener('click', async () => {
         res.className = 'checkres'; res.textContent = '…';
@@ -287,7 +289,7 @@
       e.preventDefault(); const coins = rtype.value === 'coins'; const m = coins ? Math.round(parseFloat(reward.value)) : Math.round(parseFloat(reward.value) * 1000);
       const b = { reward_type: rtype.value, reward_m: m, url: url.value.trim(), enabled: enabled.checked };
       if (!isSub) { b.click = click.checked; b.postback = postback.checked; }
-      if (isNew) { b.type = type; if (isSub) b.channel = channel.value.trim(); }
+      if (isNew) { b.type = type; if (isSub) b.channel = channel.value.trim(); } else if (isSub && !t.channel) b.channel = channel.value.trim();
       if (await guard(() => api(isNew ? '/api/admin/tasks' : '/api/admin/tasks/' + t.key, b))) { toast('ذخیره شد', 'good'); drawer.classList.add('hidden'); loadAds(); }
     });
     body.append(form);
