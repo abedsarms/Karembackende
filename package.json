@@ -8,6 +8,6 @@
   "scripts": {
     "start": "node start.js",
     "dev": "DEV_MODE=1 node server.js",
-    "test": "node test/smoke.js && node test/backup.js"
+    "test": "node test/smoke.js && node test/lottery.js && node test/backup.js"
   }
 }

@@ -71,29 +71,43 @@ const RULES = {
   subRecheckSec: num(env.SUB_RECHECK_SEC, 1800), // how often a finished subscribe task is re-verified
   maxPendingWithdrawals: 2,
 };
-const WHEEL_DEFAULT = [0, 500, 0, 1500, 250, 0, 5000, 250]; // prize per slice (milli-stars), 0 = nothing
-const WHEEL_WEIGHTS_DEFAULT = [10, 10, 10, 10, 10, 10, 7, 10]; // 5⭐ slice: ≈9.1 % instead of 12.5 %
-const WHEEL = (() => {
+// Wheel slices: { t: 'stars' | 'coins' | 'none', a: amount (milli-stars for stars, whole coins for coins), w: weight }.
+// First-run defaults live here; after that the live wheel is stored in the DB and managed from the admin panel (🎡 tab).
+const WHEEL_DEFAULT = [
+  { t: 'none', a: 0, w: 10 }, { t: 'stars', a: 500, w: 10 }, { t: 'coins', a: 5, w: 10 }, { t: 'stars', a: 1500, w: 10 }, { t: 'stars', a: 250, w: 10 },
+  { t: 'none', a: 0, w: 10 }, { t: 'stars', a: 5000, w: 7 }, { t: 'stars', a: 250, w: 10 }, { t: 'none', a: 0, w: 10 }, { t: 'coins', a: 20, w: 5 },
+];
+const WHEEL = JSON.parse(JSON.stringify((() => { // optional first-run override: WHEEL="0,500,1500,..." (milli-stars per slice, 0 = nothing)
   const w = (env.WHEEL || '').split(',').filter((x) => x.trim() !== '').map(Number);
-  return w.length >= 2 && w.every((x) => Number.isSafeInteger(x) && x >= 0) ? w : WHEEL_DEFAULT;
-})();
-const WHEEL_WEIGHTS = (() => {
-  const w = (env.WHEEL_WEIGHTS || '').split(',').filter((x) => x.trim() !== '').map(Number);
-  const ok = (a) => a.length === WHEEL.length && a.every((x) => Number.isSafeInteger(x) && x >= 0) && a.some((x) => x > 0);
-  return ok(w) ? w : ok(WHEEL_WEIGHTS_DEFAULT) ? WHEEL_WEIGHTS_DEFAULT : WHEEL.map(() => 1);
-})();
-const WHEEL_TOTAL = WHEEL_WEIGHTS.reduce((a, b) => a + b, 0);
-function rollWheel() { let r = crypto.randomInt(WHEEL_TOTAL); for (let i = 0; i < WHEEL_WEIGHTS.length; i++) { if (r < WHEEL_WEIGHTS[i]) return i; r -= WHEEL_WEIGHTS[i]; } return WHEEL.length - 1; }
+  return w.length >= 4 && w.length <= 16 && w.every((x) => Number.isSafeInteger(x) && x >= 0) ? w.map((a) => ({ t: a > 0 ? 'stars' : 'none', a, w: 1 })) : WHEEL_DEFAULT;
+})())); // mutable, loaded from DB below
+function sanitizeWheel(list) {
+  if (!Array.isArray(list) || list.length < 4 || list.length > 16) fail(400, 'BAD_AMOUNT');
+  const out = list.map((x) => {
+    if (!x || !['stars', 'coins', 'none'].includes(x.t)) fail(400, 'BAD_AMOUNT');
+    const a = x.t === 'none' ? 0 : x.a;
+    if (!Number.isSafeInteger(a) || a < 0 || (x.t !== 'none' && a < 1) || a > (x.t === 'coins' ? 100000 : 1e8)) fail(400, 'BAD_AMOUNT');
+    if (!Number.isSafeInteger(x.w) || x.w < 0 || x.w > 1000) fail(400, 'BAD_AMOUNT');
+    return { t: x.t, a, w: x.w };
+  });
+  if (!out.some((x) => x.w > 0)) fail(400, 'BAD_AMOUNT');
+  return out;
+}
+function rollWheel() {
+  const total = WHEEL.reduce((a, x) => a + x.w, 0); let r = crypto.randomInt(total);
+  for (let i = 0; i < WHEEL.length; i++) { if (r < WHEEL[i].w) return i; r -= WHEEL[i].w; }
+  return WHEEL.length - 1;
+}
 
 const httpsOrEmpty = (u) => (u && /^https:\/\//i.test(u) ? u : '');
 // First-run defaults (from .env). After the first start the live configuration is stored in the database
 // and is managed from the admin panel (📢 tab) — editing .env afterwards does not change existing tasks.
 const TASK_DEFAULTS = {
   ad1: { type: 'ad', reward: 70, click: true, url: httpsOrEmpty(env.AD1_URL), postback: env.AD1_POSTBACK === '1' },
-  ad2: { type: 'ad', reward: 50, url: httpsOrEmpty(env.AD2_URL), postback: env.AD2_POSTBACK === '1' },
+  ad2: { type: 'ad', reward: 1, rewardType: 'coins', url: httpsOrEmpty(env.AD2_URL), postback: env.AD2_POSTBACK === '1' }, // Ad #2 pays 1 in-game coin (🪙) instead of ⭐
   ad3: { type: 'ad', reward: 30, url: httpsOrEmpty(env.AD3_URL), postback: env.AD3_POSTBACK === '1' },
   sub1: { type: 'sub', reward: 75, url: httpsOrEmpty(env.SUB1_URL), channel: env.SUB1_CHANNEL || '' },
-  sub2: { type: 'sub', reward: 75, url: httpsOrEmpty(env.SUB2_URL), channel: env.SUB2_CHANNEL || '' },
+  sub2: { type: 'sub', reward: 8, rewardType: 'coins', url: httpsOrEmpty(env.SUB2_URL), channel: env.SUB2_CHANNEL || '' },
 };
 const TASKS = {}; // key -> { type, reward, url, channel, click, postback, enabled }  (mutable, loaded from DB)
 // the wheel has exactly ONE ad: shown after the spin, before the prize is paid
@@ -150,13 +164,27 @@ CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, action TEXT NOT NULL, target TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS league_awards(week TEXT NOT NULL, rank INTEGER NOT NULL, user_id INTEGER NOT NULL, amount INTEGER NOT NULL, PRIMARY KEY(week, rank));
 CREATE TABLE IF NOT EXISTS devices(device_hash TEXT NOT NULL, user_id INTEGER NOT NULL, first_seen INTEGER NOT NULL, PRIMARY KEY(device_hash, user_id));
+CREATE TABLE IF NOT EXISTS spin_log(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, idx INTEGER NOT NULL, t TEXT NOT NULL, a INTEGER NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS coin_ledger(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, kind TEXT NOT NULL, amount INTEGER NOT NULL, ref TEXT, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS coin_ledger_user ON coin_ledger(user_id);
+CREATE TABLE IF NOT EXISTS lottery_events(id INTEGER PRIMARY KEY AUTOINCREMENT, start_at INTEGER NOT NULL, end_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active',
+  seed TEXT NOT NULL, seed_hash TEXT NOT NULL, result TEXT, drawn_at INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS lottery_pieces(event_id INTEGER NOT NULL, user_id INTEGER NOT NULL, tier TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(event_id, user_id, tier));
+CREATE TABLE IF NOT EXISTS lottery_boxes(id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL, user_id INTEGER NOT NULL, tier TEXT NOT NULL, cost INTEGER NOT NULL, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS lottery_boxes_user ON lottery_boxes(user_id, created_at);
+CREATE TABLE IF NOT EXISTS lottery_results(event_id INTEGER NOT NULL, user_id INTEGER NOT NULL, tier TEXT NOT NULL, kind TEXT NOT NULL, amount INTEGER NOT NULL, PRIMARY KEY(event_id, user_id, tier, kind));
 `);
 
 function addColumn(table, col, def) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch { /* already exists */ } }
 addColumn('devices', 'fp_hash', "TEXT NOT NULL DEFAULT ''");
 addColumn('devices', 'ip', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'debt', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('users', 'coins', 'INTEGER NOT NULL DEFAULT 0 CHECK(coins>=0)');
+addColumn('tasks', 'reward_type', "TEXT NOT NULL DEFAULT 'stars'");
 addColumn('task_limits', 'paid', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('task_limits', 'paid_coins', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('sessions', 'ptype', "TEXT NOT NULL DEFAULT 'stars'");
+addColumn('lottery_boxes', 'opened', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('task_limits', 'last_check', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('sessions', 'clicked', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('sessions', 'prize', 'INTEGER NOT NULL DEFAULT 0');
@@ -235,20 +263,38 @@ function loadTasks() {
   if (!q('SELECT COUNT(*) c FROM tasks').get().c) {
     let i = 0;
     for (const [key, d] of Object.entries(TASK_DEFAULTS)) {
-      q('INSERT INTO tasks(key,type,reward,url,channel,click,postback,enabled,sort,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
-        .run(key, d.type, d.reward, d.url || '', d.channel || '', d.click ? 1 : 0, d.postback ? 1 : 0, 1, i++, now());
+      q('INSERT INTO tasks(key,type,reward,url,channel,click,postback,enabled,sort,updated_at,reward_type) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+        .run(key, d.type, d.reward, d.url || '', d.channel || '', d.click ? 1 : 0, d.postback ? 1 : 0, 1, i++, now(), d.rewardType || 'stars');
     }
   }
   for (const k of Object.keys(TASKS)) delete TASKS[k];
   for (const r of q('SELECT * FROM tasks ORDER BY type, sort, key').all()) {
-    TASKS[r.key] = { type: r.type, reward: r.reward, url: r.url, channel: r.channel, click: !!r.click, postback: !!r.postback, enabled: !!r.enabled };
+    TASKS[r.key] = { type: r.type, reward: r.reward, rewardType: r.reward_type === 'coins' ? 'coins' : 'stars', url: r.url, channel: r.channel, click: !!r.click, postback: !!r.postback, enabled: !!r.enabled };
   }
   const st = Object.fromEntries(q('SELECT key, value FROM settings').all().map((r) => [r.key, r.value]));
   if (st.spinAdUrl !== undefined) SETTINGS.spinAdUrl = st.spinAdUrl;
   if (st.perTaskLimit !== undefined && Number.isSafeInteger(+st.perTaskLimit) && +st.perTaskLimit > 0) RULES.perTaskLimit = +st.perTaskLimit;
+  if (st.spinEarn !== undefined && Number.isSafeInteger(+st.spinEarn) && +st.spinEarn >= 1) RULES.spinEarn = +st.spinEarn;
+  if (st.wheel) { try { const w = sanitizeWheel(JSON.parse(st.wheel)); WHEEL.length = 0; WHEEL.push(...w); } catch { /* keep defaults */ } }
 }
 const saveSetting = (k, v) => q('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, String(v));
 loadTasks();
+// one-time: on an existing database Ad #2 starts paying 1 coin instead of ⭐ (changeable any time in the admin panel)
+if (!q("SELECT 1 x FROM settings WHERE key='coinAdMigrated'").get()) {
+  if (TASKS.ad2 && TASKS.ad2.type === 'ad' && TASKS.ad2.rewardType !== 'coins') {
+    q("UPDATE tasks SET reward_type='coins', reward=1, updated_at=? WHERE key='ad2'").run(now());
+    loadTasks();
+  }
+  saveSetting('coinAdMigrated', '1');
+}
+// one-time: the second subscribe task pays 8 🪙 (≈ the old 0.075 ⭐) — changeable any time in the admin panel
+if (!q("SELECT 1 x FROM settings WHERE key='coinSubMigrated'").get()) {
+  if (TASKS.sub2 && TASKS.sub2.type === 'sub' && TASKS.sub2.rewardType !== 'coins') {
+    q("UPDATE tasks SET reward_type='coins', reward=8, updated_at=? WHERE key='sub2'").run(now());
+    loadTasks();
+  }
+  saveSetting('coinSubMigrated', '1');
+}
 
 function ensureUser(tgu, startParam, ctx) {
   const t = now();
@@ -386,7 +432,7 @@ function buildState(uid) {
     if (!def.enabled) continue; // disabled tasks are hidden from users
     const lim = limitRow(uid, key, t);
     tasks[key] = {
-      type: def.type, reward: def.reward, click: !!def.click, available: taskAvailable(def),
+      type: def.type, reward: def.reward, rewardType: def.rewardType || 'stars', click: !!def.click, available: taskAvailable(def),
       count: lim.count, max: def.type === 'ad' ? RULES.perTaskLimit : 1,
       resetAt: def.type === 'ad' ? lim.reset_at : 0, done: !!lim.done,
     };
@@ -398,8 +444,10 @@ function buildState(uid) {
     now: t,
     user: { id: u.id, name: u.first_name || u.username || String(u.id) },
     balance: u.balance,
+    coins: u.coins,
+    lottery: lotteryState(uid),
     spin: { progress: Math.min(u.earned_total - u.spin_mark, RULES.spinEarn), need: RULES.spinEarn, ready: u.earned_total - u.spin_mark >= RULES.spinEarn,
-      pending: (() => { const p = pendingPrize(uid); return p ? { prize: p.prize } : null; })() },
+      pending: (() => { const p = pendingPrize(uid); return p ? { prize: p.prize, coins: p.ptype === 'coins' } : null; })() },
     daily: { nextAt: u.daily_next_at, reward: RULES.dailyReward },
     tasks,
     refs: {
@@ -410,12 +458,192 @@ function buildState(uid) {
     withdrawals: wd,
     captchaRequired: u.claims_since_captcha >= RULES.captchaEvery,
     config: {
-      waitSec: RULES.waitSec, minWithdraw: RULES.minWithdraw, wheel: WHEEL,
+      waitSec: RULES.waitSec, minWithdraw: RULES.minWithdraw, wheel: WHEEL.map((x) => ({ t: x.t, a: x.a })),
       captchaReward: RULES.captchaReward, spinWaitSec: RULES.spinWaitSec, refAdsNeeded: RULES.refAdsNeeded, refBonus: RULES.refBonus, refPct: RULES.refPct,
       prizes: RULES.leaguePrizes, dev: cfg.devMode,
     },
   };
 }
+
+
+const H_ = {}; // route handlers
+
+// ───────────────────────── lottery: coins → boxes → ticket pieces → draw ─────────────────────────
+const TIERS = ['gold', 'silver', 'bronze'];
+const LOTTERY_DEFAULT = {
+  enabled: true, boxCost: 10, chances: { gold: 10, silver: 30, bronze: 60 }, perTicket: 9, maxTickets: 5, boxesPerDay: 50, eventDays: 10,
+  coinValue: 10,   // value of 1 🪙 in milli-stars (10 = 0.01 ⭐)
+  prizePct: 15,    // a tier's single prize is also capped at this % of the coin value spent in the event
+  prizes: { gold: 30000, silver: 15000, bronze: 5000 }, // the one prize per tier (milli-stars) = upper cap
+  consolation: { gold: 1200, silver: 400, bronze: 200 }, // milli-stars for every complete ticket that did not win
+  convert: { bronzeToSilver: 3, silverToGold: 4 },       // pieces needed for one piece of the next tier
+};
+const LOTTERY = JSON.parse(JSON.stringify(LOTTERY_DEFAULT));
+function sanitizeLottery(j) {
+  const int = (v, lo, hi) => { if (!Number.isSafeInteger(v) || v < lo || v > hi) fail(400, 'BAD_AMOUNT'); return v; };
+  const obj = (v) => { if (!v || typeof v !== 'object' || Array.isArray(v)) fail(400, 'BAD_AMOUNT'); return v; };
+  const out = { enabled: !!j.enabled, boxCost: int(j.boxCost, 1, 100000), perTicket: int(j.perTicket, 1, 100), maxTickets: int(j.maxTickets, 1, 100),
+    boxesPerDay: int(j.boxesPerDay, 1, 10000), eventDays: int(j.eventDays, 1, 60), coinValue: int(j.coinValue, 1, 100000), prizePct: int(j.prizePct, 0, 100),
+    chances: {}, prizes: {}, consolation: {}, convert: {} };
+  obj(j.chances); obj(j.prizes); obj(j.consolation); obj(j.convert);
+  for (const t of TIERS) { out.chances[t] = int(j.chances[t], 0, 100); out.prizes[t] = int(j.prizes[t], 0, 1e8); out.consolation[t] = int(j.consolation[t], 0, 1e7); }
+  out.convert.bronzeToSilver = int(j.convert.bronzeToSilver, 2, 100); out.convert.silverToGold = int(j.convert.silverToGold, 2, 100);
+  if (!TIERS.some((t) => out.chances[t] > 0)) fail(400, 'BAD_AMOUNT');
+  return out;
+}
+(function loadLottery() {
+  const r = q("SELECT value FROM settings WHERE key='lottery'").get();
+  if (!r) return;
+  try { Object.assign(LOTTERY, sanitizeLottery(JSON.parse(r.value))); } catch { /* old/invalid format → keep defaults */ }
+})();
+
+const activeEvent = () => q("SELECT * FROM lottery_events WHERE status='active' ORDER BY id DESC LIMIT 1").get();
+function newEvent(startAt) {
+  const seed = crypto.randomBytes(32).toString('hex'); // committed (hash) at the start, revealed after the draw → anyone can verify
+  const id = q('INSERT INTO lottery_events(start_at,end_at,seed,seed_hash) VALUES(?,?,?,?)').run(startAt, startAt + LOTTERY.eventDays * 24 * H, seed, sha(seed)).lastInsertRowid;
+  return q('SELECT * FROM lottery_events WHERE id=?').get(id);
+}
+const ensureEvent = () => activeEvent() || newEvent(now());
+const piecesOf = (eventId, uid) => {
+  const o = { gold: 0, silver: 0, bronze: 0 };
+  for (const r of q('SELECT tier, count FROM lottery_pieces WHERE event_id=? AND user_id=?').all(eventId, uid)) o[r.tier] = r.count;
+  return o;
+};
+const coinsSpent = (eventId) => q('SELECT COALESCE(SUM(cost),0) s FROM lottery_boxes WHERE event_id=?').get(eventId).s;
+/** the single prize of a tier: its cap, but never more than prizePct % of the coin value spent in the event */
+const tierPrize = (L, spent, tier) => Math.min(L.prizes[tier], Math.floor((spent * L.coinValue * L.prizePct) / 100));
+const pendingBox = (eventId, uid) => q('SELECT * FROM lottery_boxes WHERE event_id=? AND user_id=? AND opened=0 ORDER BY id DESC LIMIT 1').get(eventId, uid);
+function lotteryState(uid) {
+  const ev = ensureEvent(); const t = now();
+  const last = q("SELECT * FROM lottery_events WHERE status='drawn' ORDER BY id DESC LIMIT 1").get();
+  let lastOut = null;
+  if (last) {
+    let res = {}; try { res = JSON.parse(last.result || '{}'); } catch { /* ignore */ }
+    const per = (res.config && res.config.perTicket) || LOTTERY.perTicket;
+    const mine = q('SELECT tier, kind, amount FROM lottery_results WHERE event_id=? AND user_id=?').all(last.id, uid);
+    lastOut = {
+      id: last.id, drawnAt: last.drawn_at, seed: last.seed, seedHash: last.seed_hash, mine,
+      prizes: Object.fromEntries(TIERS.map((k) => [k, ((res.tiers && res.tiers[k] && res.tiers[k].prize) || 0)])),
+      joined: !!q('SELECT 1 x FROM lottery_pieces WHERE event_id=? AND user_id=? AND count>=?').get(last.id, uid, per),
+    };
+  }
+  const spent = coinsSpent(ev.id);
+  return {
+    enabled: LOTTERY.enabled, event: { id: ev.id, startAt: ev.start_at, endAt: ev.end_at, seedHash: ev.seed_hash, ended: t >= ev.end_at },
+    boxCost: LOTTERY.boxCost, chances: LOTTERY.chances, perTicket: LOTTERY.perTicket, maxTickets: LOTTERY.maxTickets,
+    prizes: Object.fromEntries(TIERS.map((k) => [k, tierPrize(LOTTERY, spent, k)])), prizeCaps: LOTTERY.prizes, consolation: LOTTERY.consolation, convert: LOTTERY.convert,
+    pieces: piecesOf(ev.id, uid), pendingBox: !!pendingBox(ev.id, uid),
+    boxesLeft: Math.max(0, LOTTERY.boxesPerDay - q('SELECT COUNT(*) c FROM lottery_boxes WHERE user_id=? AND created_at>?').get(uid, t - 24 * H).c),
+    last: lastOut,
+  };
+}
+/** step 1: pay boxCost coins → the (blurred) boxes unlock. The piece is decided now (server RNG) but shown when the user picks a box. */
+H_.lotteryUnlock = (c) => {
+  const notes = drawDue(); notes.forEach(([id, text]) => notify(id, text)); // make sure an ended event is closed first
+  return tx(() => {
+    if (!LOTTERY.enabled) fail(403, 'DISABLED');
+    const u = getUser(c.user.id); const t = now();
+    if (u.flagged) fail(403, 'FLAGGED');
+    const ev = ensureEvent(); if (t >= ev.end_at) fail(409, 'EVENT_ENDED');
+    if (pendingBox(ev.id, u.id)) fail(409, 'PENDING_BOX');
+    if (u.coins < LOTTERY.boxCost) fail(402, 'NO_COINS');
+    if (q('SELECT COUNT(*) c FROM lottery_boxes WHERE user_id=? AND created_at>?').get(u.id, t - 24 * H).c >= LOTTERY.boxesPerDay) fail(429, 'DAILY_LIMIT');
+    const have = piecesOf(ev.id, u.id); const cap = LOTTERY.maxTickets * LOTTERY.perTicket;
+    const open = TIERS.filter((k) => have[k] < cap && LOTTERY.chances[k] > 0); // a tier at its ticket cap is skipped
+    if (!open.length) fail(409, 'ALL_CAPPED');
+    const total = open.reduce((a, k) => a + LOTTERY.chances[k], 0);
+    let r = crypto.randomInt(total); let tier = open[open.length - 1];
+    for (const k of open) { if (r < LOTTERY.chances[k]) { tier = k; break; } r -= LOTTERY.chances[k]; }
+    q('UPDATE users SET coins=coins-? WHERE id=?').run(LOTTERY.boxCost, u.id);
+    q('INSERT INTO coin_ledger(user_id,kind,amount,ref,created_at) VALUES(?,?,?,?,?)').run(u.id, 'box', -LOTTERY.boxCost, String(ev.id), t);
+    q('INSERT INTO lottery_boxes(event_id,user_id,tier,cost,created_at,opened) VALUES(?,?,?,?,?,0)').run(ev.id, u.id, tier, LOTTERY.boxCost, t);
+    return { state: buildState(u.id) };
+  });
+};
+/** step 2: the user picks one of the 3 identical boxes → the piece is revealed and added */
+H_.lotteryOpen = (c) => tx(() => {
+  const u = getUser(c.user.id); const ev = activeEvent();
+  const b = ev && pendingBox(ev.id, u.id); if (!b) fail(404, 'NO_BOX');
+  q('UPDATE lottery_boxes SET opened=1 WHERE id=?').run(b.id);
+  q('INSERT INTO lottery_pieces(event_id,user_id,tier,count) VALUES(?,?,?,1) ON CONFLICT(event_id,user_id,tier) DO UPDATE SET count=count+1').run(ev.id, u.id, b.tier);
+  return { tier: b.tier, pieces: piecesOf(ev.id, u.id)[b.tier], state: buildState(u.id) };
+});
+/** one-way piece conversion: n bronze → 1 silver, m silver → 1 gold (not above the per-tier cap) */
+H_.lotteryConvert = (c) => tx(() => {
+  if (!LOTTERY.enabled) fail(403, 'DISABLED');
+  const from = String(c.body.from || ''); const map = { bronze: ['silver', LOTTERY.convert.bronzeToSilver], silver: ['gold', LOTTERY.convert.silverToGold] };
+  if (!map[from]) fail(400, 'BAD_TIER');
+  const [to, need] = map[from]; const u = getUser(c.user.id);
+  if (u.flagged) fail(403, 'FLAGGED');
+  const ev = ensureEvent(); if (now() >= ev.end_at) fail(409, 'EVENT_ENDED');
+  const have = piecesOf(ev.id, u.id);
+  if (have[from] < need) fail(409, 'NOT_ENOUGH');
+  if (have[to] >= LOTTERY.maxTickets * LOTTERY.perTicket) fail(409, 'ALL_CAPPED');
+  q('UPDATE lottery_pieces SET count=count-? WHERE event_id=? AND user_id=? AND tier=?').run(need, ev.id, u.id, from);
+  q('INSERT INTO lottery_pieces(event_id,user_id,tier,count) VALUES(?,?,?,1) ON CONFLICT(event_id,user_id,tier) DO UPDATE SET count=count+1').run(ev.id, u.id, to);
+  return { from, to, used: need, state: buildState(u.id) };
+});
+
+/** deterministic, verifiable randomness: HMAC-SHA256(seed, counter) → [0,1) */
+function seededRand(seed) { let n = 0; return () => crypto.createHmac('sha256', seed).update(String(n++)).digest().readUIntBE(0, 6) / 2 ** 48; }
+function drawEvent(ev) {
+  // boxes that were paid but never opened are opened automatically so nobody loses a piece
+  for (const b of q('SELECT * FROM lottery_boxes WHERE event_id=? AND opened=0').all(ev.id)) {
+    q('UPDATE lottery_boxes SET opened=1 WHERE id=?').run(b.id);
+    q('INSERT INTO lottery_pieces(event_id,user_id,tier,count) VALUES(?,?,?,1) ON CONFLICT(event_id,user_id,tier) DO UPDATE SET count=count+1').run(ev.id, b.user_id, b.tier);
+  }
+  const L = JSON.parse(JSON.stringify(LOTTERY)); const rand = seededRand(ev.seed); const cap = L.maxTickets * L.perTicket;
+  const spent = coinsSpent(ev.id);
+  const result = { config: L, spent, tiers: {}, consolation: { users: 0, tickets: 0, paid: 0 } };
+  const notes = []; const winnerOf = {}; const cons = new Map(); // user -> { total, parts: {tier: amount} }
+  const holdersByTier = {};
+  for (const tier of TIERS) {
+    const rows = q(`SELECT p.user_id id, p.count c FROM lottery_pieces p JOIN users u ON u.id=p.user_id
+      WHERE p.event_id=? AND p.tier=? AND p.count>=? AND u.banned=0 AND u.flagged=0 ORDER BY p.user_id`).all(ev.id, tier, L.perTicket);
+    holdersByTier[tier] = rows;
+    const cand = rows.map((r) => ({ id: r.id, w: Math.min(r.c, cap) / L.perTicket })); // every piece above a full ticket adds 1/perTicket ticket
+    const prize = tierPrize(L, spent, tier); const info = { candidates: rows.length, prize: 0, winner: null, weight: 0 };
+    if (cand.length && prize > 0) {
+      const total = cand.reduce((a, x) => a + x.w, 0); let r = rand() * total; let i = 0;
+      for (; i < cand.length - 1; i++) { if (r < cand[i].w) break; r -= cand[i].w; }
+      const w = cand[i]; winnerOf[tier] = w.id; Object.assign(info, { prize, winner: w.id, weight: +w.w.toFixed(4) });
+      credit(w.id, 'lottery_prize', prize, `${ev.id}:${tier}`);
+      q('INSERT INTO lottery_results(event_id,user_id,tier,kind,amount) VALUES(?,?,?,?,?)').run(ev.id, w.id, tier, 'win', prize);
+      notes.push([w.id, `🎉 Lottery #${ev.id}: you won ${prize / 1000} ⭐ (${tier})! / برنده‌ی قرعه‌کشی شدید: ${prize / 1000} ⭐`]);
+    }
+    result.tiers[tier] = info;
+  }
+  // every complete ticket that did not win pays its tier's consolation (the winning ticket is excluded; incomplete tickets get nothing)
+  for (const tier of TIERS) {
+    for (const r of holdersByTier[tier]) {
+      const n = Math.floor(Math.min(r.c, cap) / L.perTicket) - (winnerOf[tier] === r.id ? 1 : 0);
+      const amount = n * L.consolation[tier]; if (n <= 0 || amount <= 0) continue;
+      const e = cons.get(r.id) || { total: 0, parts: {}, tickets: 0 };
+      e.total += amount; e.parts[tier] = amount; e.tickets += n; cons.set(r.id, e);
+    }
+  }
+  for (const [id, e] of cons) {
+    credit(id, 'lottery_consolation', e.total, String(ev.id));
+    for (const [tier, amount] of Object.entries(e.parts)) q('INSERT INTO lottery_results(event_id,user_id,tier,kind,amount) VALUES(?,?,?,?,?)').run(ev.id, id, tier, 'consolation', amount);
+    result.consolation.users++; result.consolation.tickets += e.tickets; result.consolation.paid += e.total;
+    notes.push([id, `🎁 Lottery #${ev.id}: ${e.tickets} ticket(s) did not win — consolation ${e.total / 1000} ⭐. / جایزه‌ی تسلیت بلیط‌های برنده‌نشده: ${e.total / 1000} ⭐`]);
+  }
+  q("UPDATE lottery_events SET status='drawn', result=?, drawn_at=? WHERE id=?").run(JSON.stringify(result), now(), ev.id);
+  return notes;
+}
+/** closes + draws an ended event and opens the next one. force=true ends the running event right now (admin). → notifications to send */
+function drawDue(force) {
+  const ev = activeEvent();
+  if (!ev) { tx(() => { if (!activeEvent()) newEvent(now()); }); return []; }
+  if (!force && now() < ev.end_at) return [];
+  return tx(() => {
+    const cur = activeEvent(); if (!cur || cur.id !== ev.id) return [];
+    if (force) q('UPDATE lottery_events SET end_at=? WHERE id=?').run(Math.min(cur.end_at, now()), cur.id);
+    const notes = drawEvent(cur); newEvent(now()); log('lottery drawn', cur.id, 'notifications', notes.length);
+    return notes;
+  });
+}
+const runLottery = () => { try { drawDue().forEach(([id, text]) => notify(id, text)); } catch (e) { log('lottery error', e.message); } };
 
 // ───────────────────────── captcha ─────────────────────────
 function makeCaptcha() {
@@ -432,7 +660,6 @@ function makeCaptcha() {
 }
 
 // ───────────────────────── route handlers ─────────────────────────
-const H_ = {};
 
 H_.auth = (c) => ({ state: buildState(c.user.id) });
 H_.state = H_.auth;
@@ -482,7 +709,7 @@ H_.taskClaim = async (c) => {
       if (lim.count >= RULES.perTaskLimit) lim.reset_at = t + RULES.windowMs;
     } else lim.done = 1;
     saveLimit(user.id, key, lim);
-    if (def.type === 'sub') q('UPDATE task_limits SET paid=?, last_check=? WHERE user_id=? AND task=?').run(def.reward, t, user.id, key);
+    if (def.type === 'sub') q('UPDATE task_limits SET paid=?, paid_coins=?, last_check=? WHERE user_id=? AND task=?').run(def.reward, def.rewardType === 'coins' ? 1 : 0, t, user.id, key);
 
     let activated = user;
     if (def.type === 'ad') {
@@ -497,6 +724,11 @@ H_.taskClaim = async (c) => {
     q('UPDATE users SET claims_since_captcha=claims_since_captcha+1 WHERE id=?').run(user.id);
     const halved = !!def.click && !s2.clicked; // must click at least once for the full reward
     const reward = halved ? Math.floor(def.reward / 2) : def.reward;
+    if (def.rewardType === 'coins') { // in-game coins (ad or subscribe): no ⭐, no league/spin progress, no referral commission
+      q('UPDATE users SET coins=coins+? WHERE id=?').run(reward, user.id);
+      q('INSERT INTO coin_ledger(user_id,kind,amount,ref,created_at) VALUES(?,?,?,?,?)').run(user.id, def.type === 'sub' ? 'sub' : 'ad', reward, key, t);
+      return { reward, halved, coins: true, state: buildState(user.id) };
+    }
     earn(activated, def.type === 'ad' ? 'ad' : 'sub', reward, key);
     return { reward, halved, state: buildState(user.id) };
   });
@@ -549,13 +781,14 @@ H_.spin = (c) => tx(() => {
   if (pendingPrize(u.id)) fail(409, 'PENDING_PRIZE');
   if (u.earned_total - u.spin_mark < RULES.spinEarn) fail(409, 'NOT_READY');
   const index = rollWheel(); // server-side RNG
-  const prize = WHEEL[index];
+  const slice = WHEEL[index]; const prize = slice.t === 'none' ? 0 : slice.a; const coins = slice.t === 'coins';
   q('UPDATE users SET spin_mark=earned_total WHERE id=?').run(u.id);
   if (prize > 0) {
     const sid = crypto.randomBytes(16).toString('hex');
-    q("INSERT INTO sessions(id,user_id,task,started_at,prize,idx) VALUES(?,?,'spin_claim',?,?,?)").run(sid, u.id, t, prize, index);
+    q("INSERT INTO sessions(id,user_id,task,started_at,prize,idx,ptype) VALUES(?,?,'spin_claim',?,?,?,?)").run(sid, u.id, t, prize, index, coins ? 'coins' : 'stars');
   }
-  return { index, prize, state: buildState(u.id) };
+  q('INSERT INTO spin_log(user_id,idx,t,a,at) VALUES(?,?,?,?,?)').run(u.id, index, slice.t, prize, t);
+  return { index, prize, coins, state: buildState(u.id) };
 });
 // Step 2a: the ONE wheel ad — user opens it (timer starts now) (timer starts now)
 H_.spinClaimStart = (c) => tx(() => {
@@ -571,6 +804,11 @@ H_.spinClaim = (c) => tx(() => {
   if (t - s.started_at < RULES.spinWaitSec * 1000) fail(429, 'TOO_EARLY', { retryMs: RULES.spinWaitSec * 1000 - (t - s.started_at) });
   if (t - s.started_at > RULES.sessionMaxAgeMs) { q('UPDATE sessions SET confirmed=0 WHERE id=?').run(s.id); fail(410, 'EXPIRED'); }
   q('UPDATE sessions SET used=1 WHERE id=?').run(s.id);
+  if (s.ptype === 'coins') { // coin slice: no ⭐, no league progress
+    q('UPDATE users SET coins=coins+? WHERE id=?').run(s.prize, c.user.id);
+    q('INSERT INTO coin_ledger(user_id,kind,amount,ref,created_at) VALUES(?,?,?,?,?)').run(c.user.id, 'wheel', s.prize, String(s.idx), t);
+    return { prize: s.prize, coins: true, state: buildState(c.user.id) };
+  }
   credit(c.user.id, 'spin', s.prize, String(s.idx));
   return { prize: s.prize, state: buildState(c.user.id) };
 });
@@ -685,7 +923,7 @@ H_.adminUsers = (c) => {
   return { items, total, page, per };
 };
 H_.adminUser = (c) => {
-  const id = +c.params.id; const user = q(`SELECT ${userCols}, device_hash, spin_mark, claims_since_captcha, daily_next_at FROM users WHERE id=?`).get(id);
+  const id = +c.params.id; const user = q(`SELECT ${userCols}, coins, device_hash, spin_mark, claims_since_captcha, daily_next_at FROM users WHERE id=?`).get(id);
   if (!user) fail(404, 'NOT_FOUND');
   const devices = q('SELECT substr(device_hash,1,10) device, substr(fp_hash,1,10) fp, ip, first_seen FROM devices WHERE user_id=?').all(id);
   const sameDevice = q(`SELECT DISTINCT u.id, u.first_name, u.username, u.banned FROM users u JOIN devices d ON d.user_id=u.id
@@ -712,15 +950,17 @@ const isHttps = (u) => typeof u === 'string' && u.length <= 500 && /^https:\/\/[
 const CHANNEL_RE = /^(@[A-Za-z][A-Za-z0-9_]{3,31}|-100\d{5,15})$/;
 const persistTask = (key) => {
   const d = TASKS[key];
-  q(`INSERT INTO tasks(key,type,reward,url,channel,click,postback,enabled,sort,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)
-     ON CONFLICT(key) DO UPDATE SET reward=excluded.reward,url=excluded.url,channel=excluded.channel,click=excluded.click,postback=excluded.postback,enabled=excluded.enabled,updated_at=excluded.updated_at`)
-    .run(key, d.type, d.reward, d.url, d.channel, d.click ? 1 : 0, d.postback ? 1 : 0, d.enabled ? 1 : 0, Number(key.replace(/\D/g, '')) || 0, now());
+  q(`INSERT INTO tasks(key,type,reward,url,channel,click,postback,enabled,sort,updated_at,reward_type) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(key) DO UPDATE SET reward=excluded.reward,reward_type=excluded.reward_type,url=excluded.url,channel=excluded.channel,click=excluded.click,postback=excluded.postback,enabled=excluded.enabled,updated_at=excluded.updated_at`)
+    .run(key, d.type, d.reward, d.url, d.channel, d.click ? 1 : 0, d.postback ? 1 : 0, d.enabled ? 1 : 0, Number(key.replace(/\D/g, '')) || 0, now(), d.rewardType === 'coins' ? 'coins' : 'stars');
 };
 H_.adminTasks = (c) => {
   const t = now();
   const claims = Object.fromEntries(q("SELECT ref, COUNT(*) n, COALESCE(SUM(amount),0) paid, COALESCE(SUM(CASE WHEN created_at>? THEN 1 ELSE 0 END),0) n24 FROM ledger WHERE kind IN ('ad','sub') GROUP BY ref").all(t - 24 * H).map((r) => [r.ref, r]));
   const sess = Object.fromEntries(q('SELECT task, COUNT(*) n, COALESCE(SUM(clicked),0) c FROM sessions WHERE used=1 GROUP BY task').all().map((r) => [r.task, r]));
   const subs = Object.fromEntries(q('SELECT task, COUNT(*) n FROM task_limits WHERE done=1 GROUP BY task').all().map((r) => [r.task, r.n]));
+  const coinClaims = Object.fromEntries(q("SELECT ref, COUNT(*) n, COALESCE(SUM(amount),0) paid, COALESCE(SUM(CASE WHEN created_at>? THEN 1 ELSE 0 END),0) n24 FROM coin_ledger WHERE kind IN ('ad','sub') GROUP BY ref").all(t - 24 * H).map((r) => [r.ref, r]));
+  Object.assign(claims, coinClaims); // coin ads are tracked in coin_ledger (key names never collide with star ads)
   const items = Object.entries(TASKS).map(([key, d]) => ({
     key, ...d, claims: (claims[key] || {}).n || 0, claims24: (claims[key] || {}).n24 || 0, paid: (claims[key] || {}).paid || 0,
     sessions24: (sess[key] || {}).n || 0, clicks24: (sess[key] || {}).c || 0, subscribed: subs[key] || 0,
@@ -732,7 +972,15 @@ H_.adminTasks = (c) => {
 };
 function readTaskFields(b, cur) {
   const out = { ...cur };
-  if (b.reward_m !== undefined) { if (!Number.isSafeInteger(b.reward_m) || b.reward_m < 1 || b.reward_m > 1e7) fail(400, 'BAD_AMOUNT'); out.reward = b.reward_m; }
+  if (b.reward_type !== undefined) {
+    if (!['stars', 'coins'].includes(b.reward_type) || false) fail(400, 'BAD_AMOUNT');
+    if (b.reward_type !== (cur.rewardType || 'stars') && b.reward_m === undefined) fail(400, 'BAD_AMOUNT'); // units change → a new amount is required
+    out.rewardType = b.reward_type;
+  }
+  if (b.reward_m !== undefined) {
+    const coins = out.rewardType === 'coins'; // coins are whole numbers (1 = 1 🪙), stars are milli-stars
+    if (!Number.isSafeInteger(b.reward_m) || b.reward_m < 1 || b.reward_m > (coins ? 10000 : 1e7)) fail(400, 'BAD_AMOUNT'); out.reward = b.reward_m;
+  }
   if (b.url !== undefined) { const u = String(b.url).trim(); if (u && !isHttps(u)) fail(400, 'BAD_URL'); out.url = u; }
   if (b.enabled !== undefined) out.enabled = !!b.enabled;
   if (out.type === 'ad') {
@@ -751,20 +999,20 @@ H_.adminTaskCreate = (c) => tx(() => {
     if (Object.values(TASKS).some((d) => d.type === 'sub' && d.channel.toLowerCase() === channel.toLowerCase())) fail(409, 'DUPLICATE');
     if (!isHttps(String(c.body.url || '').trim())) fail(400, 'BAD_URL');
   }
-  const base = { type, reward: 0, url: '', channel, click: false, postback: false, enabled: true };
+  const base = { type, reward: 0, rewardType: 'stars', url: '', channel, click: false, postback: false, enabled: true };
   if (c.body.reward_m === undefined) fail(400, 'BAD_AMOUNT');
   const d = readTaskFields(c.body, base);
   const used = [...Object.keys(TASKS), ...q('SELECT DISTINCT task FROM task_limits WHERE task LIKE ?').all(type + '%').map((r) => r.task)];
   const key = type + (Math.max(0, ...used.filter((k) => k.startsWith(type)).map((k) => +k.slice(type.length) || 0)) + 1); // never reuse an old key (its history stays separate)
   TASKS[key] = d; persistTask(key);
-  logAdmin('task_create', key, `${type} ${d.reward / 1000} ⭐ ${d.channel || d.url}`.slice(0, 200));
+  logAdmin('task_create', key, `${type} ${d.rewardType === 'coins' ? d.reward + ' coins' : d.reward / 1000 + ' ⭐'} ${d.channel || d.url}`.slice(0, 200));
   return { ok: true, key };
 });
 H_.adminTaskUpdate = (c) => tx(() => {
   const key = c.params.key; const cur = TASKS[key]; if (!cur) fail(404, 'NOT_FOUND');
   if (c.body.channel !== undefined && String(c.body.channel).trim() !== cur.channel) fail(400, 'CHANNEL_LOCKED'); // changing it would make the re-check punish everyone who joined the old channel
   const d = readTaskFields(c.body, cur); TASKS[key] = d; persistTask(key);
-  logAdmin('task_update', key, JSON.stringify({ reward: d.reward / 1000, url: d.url, enabled: d.enabled, click: d.click, postback: d.postback }).slice(0, 200));
+  logAdmin('task_update', key, JSON.stringify({ reward: d.rewardType === 'coins' ? d.reward + ' coins' : d.reward / 1000, url: d.url, enabled: d.enabled, click: d.click, postback: d.postback }).slice(0, 200));
   return { ok: true };
 });
 H_.adminTaskDelete = (c) => tx(() => {
@@ -801,6 +1049,52 @@ H_.adminBackupDownload = (c) => {
   c.res.end(buf);
   return RAW;
 };
+H_.adminLottery = () => {
+  const ev = ensureEvent();
+  const per = q('SELECT tier, COUNT(*) users, COALESCE(SUM(count),0) pieces, COALESCE(SUM(CASE WHEN count>=? THEN 1 ELSE 0 END),0) holders FROM lottery_pieces WHERE event_id=? GROUP BY tier').all(LOTTERY.perTicket, ev.id);
+  const boxes = q('SELECT COUNT(*) n, COUNT(DISTINCT user_id) users, COALESCE(SUM(cost),0) coins FROM lottery_boxes WHERE event_id=?').get(ev.id);
+  const history = q("SELECT id, start_at, end_at, drawn_at, seed, seed_hash, result FROM lottery_events WHERE status='drawn' ORDER BY id DESC LIMIT 10").all().map((e) => {
+    let r = {}; try { r = JSON.parse(e.result || '{}'); } catch { /* ignore */ }
+    return { id: e.id, start_at: e.start_at, end_at: e.end_at, drawn_at: e.drawn_at, seed: e.seed, seed_hash: e.seed_hash,
+      spent: r.spent || 0, tiers: Object.fromEntries(TIERS.map((k) => [k, { candidates: 0, prize: 0, winner: null, ...((r.tiers || {})[k] || {}) }])), consolation: r.consolation || null };
+  });
+  return {
+    config: LOTTERY, defaults: LOTTERY_DEFAULT,
+    event: { id: ev.id, start_at: ev.start_at, end_at: ev.end_at, seed_hash: ev.seed_hash, boxes, prizesNow: Object.fromEntries(TIERS.map((k) => [k, tierPrize(LOTTERY, boxes.coins, k)])), tiers: Object.fromEntries(TIERS.map((k) => [k, per.find((r) => r.tier === k) || { users: 0, pieces: 0, holders: 0 }])) },
+    history, coinsInCirculation: q('SELECT COALESCE(SUM(coins),0) s FROM users').get().s,
+  };
+};
+H_.adminLotteryConfig = (c) => {
+  const b = c.body; const m = (k) => ({ ...LOTTERY[k], ...((b[k] && typeof b[k] === 'object') ? b[k] : {}) });
+  const v = sanitizeLottery({ ...LOTTERY, ...b, chances: m('chances'), prizes: m('prizes'), consolation: m('consolation'), convert: m('convert') });
+  Object.assign(LOTTERY, v); saveSetting('lottery', JSON.stringify(LOTTERY));
+  logAdmin('lottery_config', null, JSON.stringify(LOTTERY).slice(0, 200));
+  return { ok: true, config: LOTTERY };
+};
+H_.adminLotteryDraw = (c) => {
+  if (c.body.confirm !== true) fail(400, 'BAD_AMOUNT');
+  const ev = ensureEvent(); const notes = drawDue(true); notes.forEach(([id, text]) => notify(id, text));
+  logAdmin('lottery_draw_now', String(ev.id), `${notes.length} notifications`);
+  return { ok: true, drawn: ev.id, notifications: notes.length };
+};
+// ───────────────────────── admin: wheel of fortune ─────────────────────────
+H_.adminWheel = () => {
+  const total = WHEEL.reduce((a, x) => a + x.w, 0) || 1;
+  const ev = (t) => WHEEL.reduce((a, x) => a + (x.t === t ? x.a * x.w : 0), 0) / total;
+  const log7 = q('SELECT idx, t, COUNT(*) n, COALESCE(SUM(a),0) s FROM spin_log WHERE at>? GROUP BY idx, t').all(now() - 7 * 24 * H);
+  return {
+    slices: WHEEL, spinEarn: RULES.spinEarn, spinAdUrl: SETTINGS.spinAdUrl, coinValue: LOTTERY.coinValue,
+    ev: { stars: ev('stars'), coins: ev('coins'), starsEquiv: ev('stars') + ev('coins') * LOTTERY.coinValue, noneChance: WHEEL.filter((x) => x.t === 'none').reduce((a, x) => a + x.w, 0) / total },
+    spins7d: log7.reduce((a, r) => a + r.n, 0), paid7d: { stars: log7.filter((r) => r.t === 'stars').reduce((a, r) => a + r.s, 0), coins: log7.filter((r) => r.t === 'coins').reduce((a, r) => a + r.s, 0) },
+    pendingPrizes: q("SELECT COUNT(*) c FROM sessions WHERE task='spin_claim' AND used=0").get().c,
+  };
+};
+H_.adminWheelSave = (c) => tx(() => {
+  const w = sanitizeWheel(c.body.slices); WHEEL.length = 0; WHEEL.push(...w); saveSetting('wheel', JSON.stringify(w));
+  if (c.body.spinEarn !== undefined) { const n = c.body.spinEarn; if (!Number.isSafeInteger(n) || n < 1000 || n > 1e8) fail(400, 'BAD_AMOUNT'); RULES.spinEarn = n; saveSetting('spinEarn', n); }
+  logAdmin('wheel_config', null, JSON.stringify({ slices: w.length, spinEarn: RULES.spinEarn }).slice(0, 200));
+  return { ok: true };
+});
 H_.adminLog = () => ({ items: q('SELECT * FROM admin_log ORDER BY id DESC LIMIT 100').all() });
 const adminUserId = (c) => { const id = +c.params.id; if (!getUser(id)) fail(404, 'NOT_FOUND'); return id; };
 H_.adminFlag = (c) => { const id = adminUserId(c); const f = c.body.flagged ? 1 : 0; q('UPDATE users SET flagged=? WHERE id=?').run(f, id); logAdmin(f ? 'flag' : 'unflag', String(id)); return { ok: true, flagged: f }; };
@@ -895,6 +1189,9 @@ const ROUTES = [
   ['GET', /^\/api\/state$/, H_.state, 'user'],
   ['POST', /^\/api\/task\/start$/, H_.taskStart, 'user'],
   ['POST', /^\/api\/task\/claim$/, H_.taskClaim, 'user'],
+  ['POST', /^\/api\/lottery\/unlock$/, H_.lotteryUnlock, 'user'],
+  ['POST', /^\/api\/lottery\/open$/, H_.lotteryOpen, 'user'],
+  ['POST', /^\/api\/lottery\/convert$/, H_.lotteryConvert, 'user'],
   ['POST', /^\/api\/daily$/, H_.daily, 'user'],
   ['GET', /^\/api\/captcha$/, H_.captchaGet, 'user'],
   ['POST', /^\/api\/captcha\/verify$/, H_.captchaVerify, 'user'],
@@ -919,6 +1216,11 @@ const ROUTES = [
   ['POST', /^\/api\/admin\/check-channel$/, H_.adminCheckChannel, 'admin'],
   ['GET', /^\/api\/admin\/activity$/, H_.adminActivity, 'admin'],
   ['GET', /^\/api\/admin\/log$/, H_.adminLog, 'admin'],
+  ['GET', /^\/api\/admin\/wheel$/, H_.adminWheel, 'admin'],
+  ['POST', /^\/api\/admin\/wheel$/, H_.adminWheelSave, 'admin'],
+  ['GET', /^\/api\/admin\/lottery$/, H_.adminLottery, 'admin'],
+  ['POST', /^\/api\/admin\/lottery\/config$/, H_.adminLotteryConfig, 'admin'],
+  ['POST', /^\/api\/admin\/lottery\/draw-now$/, H_.adminLotteryDraw, 'admin'],
   ['GET', /^\/api\/admin\/backup$/, H_.adminBackup, 'admin'],
   ['POST', /^\/api\/admin\/backup\/run$/, H_.adminBackupRun, 'admin'],
   ['POST', /^\/api\/admin\/backup\/verify$/, H_.adminBackupVerify, 'admin'],
@@ -1033,7 +1335,7 @@ async function recheckSubs() {
   try {
     for (const [key, def] of Object.entries(TASKS)) {
       if (def.type !== 'sub' || !def.channel || !def.enabled) continue;
-      const rows = q('SELECT user_id, paid FROM task_limits WHERE task=? AND done=1 AND last_check<=? ORDER BY last_check ASC LIMIT 100').all(key, now() - RULES.subRecheckSec * 1000);
+      const rows = q('SELECT user_id, paid, paid_coins FROM task_limits WHERE task=? AND done=1 AND last_check<=? ORDER BY last_check ASC LIMIT 100').all(key, now() - RULES.subRecheckSec * 1000);
       for (const r of rows) {
         let member;
         try { member = await isMember(def.channel, r.user_id); }
@@ -1045,10 +1347,13 @@ async function recheckSubs() {
             const cur = q('SELECT done FROM task_limits WHERE user_id=? AND task=?').get(r.user_id, key);
             if (!cur || !cur.done) return false;
             q('UPDATE task_limits SET done=0, last_check=? WHERE user_id=? AND task=?').run(now(), r.user_id, key);
-            penalize(r.user_id, amount, key);
+            if (r.paid_coins) { // coin reward: take back whatever coins are still there (coins can't go negative)
+              const take = Math.min(getUser(r.user_id).coins, amount);
+              if (take > 0) { q('UPDATE users SET coins=coins-? WHERE id=?').run(take, r.user_id); q('INSERT INTO coin_ledger(user_id,kind,amount,ref,created_at) VALUES(?,?,?,?,?)').run(r.user_id, 'sub_penalty', -take, key, now()); }
+            } else penalize(r.user_id, amount, key);
             return true;
           });
-          if (done) { log('sub penalty', r.user_id, key, amount); notify(r.user_id, `⚠️ You left the channel, so ${amount / 1000} ⭐ was deducted. / کانال را ترک کردید و ${amount / 1000} ⭐ کسر شد.`); }
+          if (done) { log('sub penalty', r.user_id, key, amount); notify(r.user_id, r.paid_coins ? `⚠️ You left the channel, so ${amount} 🪙 was deducted. / کانال را ترک کردید و ${amount} 🪙 کسر شد.` : `⚠️ You left the channel, so ${amount / 1000} ⭐ was deducted. / کانال را ترک کردید و ${amount / 1000} ⭐ کسر شد.`); }
         }
         await sleep(60); // stay far below Telegram's rate limits
       }
@@ -1071,6 +1376,7 @@ server.listen(cfg.port, async () => {
   log(`CAReM listening on :${cfg.port} (devMode=${cfg.devMode})`);
   maintenance();
   backupSvc.start();
+  runLottery(); setInterval(runLottery, 60000).unref(); // closes + draws an ended lottery event
   setInterval(maintenance, H).unref();
   setInterval(recheckSubs, Math.max(1, Math.min(300, RULES.subRecheckSec)) * 1000).unref();
   if (cfg.botToken) {
