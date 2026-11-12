@@ -60,7 +60,7 @@
   const ui = {};               // transient per-task UI: {sessionId, readyAt, msg, cls}
   const cards = {};            // task key -> element refs
   let pendingClaim = null;
-  let wheelRot = 0, spinning = false, wheelDrawn = false;
+  let wheelRot = 0, spinning = false, wheelDrawn = false, wheelSig = '';
   const srvNow = () => Date.now() + offset;
 
   // ───────── i18n ─────────
@@ -128,12 +128,14 @@
   function applyState(s) {
     S = s; offset = s.now - Date.now();
     syncCards();
-    if (!wheelDrawn) { drawWheel(); wheelDrawn = true; }
+    const wsig = JSON.stringify(s.config.wheel); if (wsig !== wheelSig) { wheelSig = wsig; drawWheel(); wheelDrawn = true; }
     renderAll();
   }
   function renderAll() {
     if (!S) return;
     $('userBalance').textContent = fmt(S.balance);
+    $('userCoins').textContent = String(S.coins || 0);
+    if (!$('coinBadgeIco').firstChild && window.LotteryArt) { $('coinBadgeIco').append(LotteryArt.coin(18)); $('lotCoinIco').append(LotteryArt.coin(20)); }
     $('walletBalance').textContent = fmt(S.balance) + ' ⭐';
     $('dailyRewardBadge').textContent = '⭐ ' + fmt(S.daily.reward);
     $('refDesc').innerHTML = rich(tr('refDesc', { n: S.config.refAdsNeeded, b: fmt(S.config.refBonus), p: S.config.refPct }));
@@ -146,6 +148,7 @@
     $('capRewardText').textContent = tr('capRewardHint', { n: fmt(S.config.captchaReward) });
     renderLeagueTimer();
     renderWheelState();
+    renderLottery();
     renderWithdrawals();
     tick();
     $('authSection').classList.toggle('show', !!S.captchaRequired && !!pendingClaim);
@@ -163,7 +166,7 @@
       const card = el('div', 'card');
       const head = el('div', 'channel-info');
       const name = el('span', 'channel-name');
-      const badge = el('span', 'reward-badge', '⭐ ' + fmt(t.reward));
+      const badge = el('span', 'reward-badge');
       head.append(name, badge);
       const play = el('button', 'play-box'); play.type = 'button';
       const claim = el('button'); claim.type = 'button'; claim.classList.add('hidden');
@@ -174,7 +177,7 @@
       $(t.type === 'ad' ? 'home-sec-ads' : 'home-sec-sub').append(wrap);
       play.addEventListener('click', () => startTask(key));
       claim.addEventListener('click', () => claimTask(key));
-      cards[key] = { wrap, limit, name, play, claim, guide, msg, type: t.type, n: Number(key.replace(/\D/g, '')) };
+      cards[key] = { wrap, limit, name, badge, card, play, claim, guide, msg, type: t.type, n: Number(key.replace(/\D/g, '')) };
     }
   }
   function setMsg(key, cls, text) { ui[key] = ui[key] || {}; ui[key].cls = cls; ui[key].msg = text; }
@@ -183,6 +186,11 @@
     const c = cards[key]; if (!c || !S) return;
     const t = S.tasks[key]; const u = ui[key] || {}; const now = srvNow();
     c.name.textContent = tr(c.type === 'ad' ? 'adName' : 'subName', { n: c.n });
+    const coins = t.rewardType === 'coins'; const sig = (coins ? 'c' : 's') + t.reward;
+    if (c.badgeSig !== sig) { // reward badge: ⭐ for star tasks, coin icon + teal frame for coin tasks
+      c.badgeSig = sig; c.badge.replaceChildren(); c.badge.classList.toggle('coin', coins); c.card.classList.toggle('coin-card', coins);
+      if (coins && window.LotteryArt) { c.badge.append(LotteryArt.coin(16), document.createTextNode(String(t.reward))); } else c.badge.textContent = '⭐ ' + fmt(t.reward);
+    }
     c.guide.textContent = tr(c.type === 'ad' ? (t.click ? 'guideAdClick' : 'guideAd') : 'guideSub');
     const limited = c.type === 'ad' && t.resetAt > now;
     // limit label
@@ -229,7 +237,7 @@
     u.busy = true; refreshCard(key);
     try {
       const r = await api('/api/task/claim', { sessionId: u.sessionId });
-      ui[key] = { cooldownUntil: Date.now() + S.config.waitSec * 1000 + 300 }; setMsg(key, r.halved ? 'warn' : 'ok', tr(r.halved ? 'claimedHalf' : 'claimed', { n: fmt(r.reward) })); haptic('success');
+      ui[key] = { cooldownUntil: Date.now() + S.config.waitSec * 1000 + 300 }; setMsg(key, r.halved ? 'warn' : 'ok', tr(r.coins ? (r.halved ? 'claimedHalfCoins' : 'claimedCoins') : (r.halved ? 'claimedHalf' : 'claimed'), { n: r.coins ? r.reward : fmt(r.reward) })); haptic('success');
       applyState(r.state);
     } catch (e) {
       u.busy = false;
@@ -276,6 +284,7 @@
   // ───────── wheel ─────────
   // Galaxy Orb wheel. Three canvases: back ring (static) · slices+labels+stars (rotates) · rim/shading/hub (static).
   const WHEEL_PAL = [['#312e81', '#6366f1'], ['#581c87', '#c084fc'], ['#831843', '#f472b6'], ['#1e3a8a', '#38bdf8'], ['#4c1d95', '#8b5cf6'], ['#9d174d', '#fb7185'], ['#92400e', '#fbbf24'], ['#134e4a', '#2dd4bf']];
+  const COIN_PAL = ['#083344', '#22d3ee']; // coin slices are teal, like the coin task frames
   function wStar(ctx, cx, cy, R, r, fill) {
     ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5 - Math.PI / 2, rr = i % 2 ? r : R; ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
     ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
@@ -287,7 +296,7 @@
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save(); ctx.translate(c, c); ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.clip();
     slices.forEach((v, i) => {
-      const a = i * arc - Math.PI / 2; const pal = WHEEL_PAL[i % WHEEL_PAL.length];
+      const a = i * arc - Math.PI / 2; const pal = v.t === 'coins' ? COIN_PAL : WHEEL_PAL[i % WHEEL_PAL.length];
       const g = ctx.createRadialGradient(0, 0, 0, 0, 0, R); g.addColorStop(0, pal[0]); g.addColorStop(1, pal[1]);
       ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, R, a, a + arc); ctx.closePath(); ctx.fill();
     });
@@ -301,7 +310,8 @@
       const a = i * arc + arc / 2 - Math.PI / 2;
       ctx.save(); ctx.translate(c + Math.cos(a) * R * 0.66, c + Math.sin(a) * R * 0.66); ctx.rotate(a + Math.PI / 2);
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.shadowColor = 'rgba(0,0,40,.9)'; ctx.shadowBlur = 8; ctx.fillStyle = '#fff';
-      if (v > 0) { ctx.font = `800 ${fs}px sans-serif`; ctx.fillText(fmt(v), 0, -fs * 0.18); ctx.shadowBlur = 0; wStar(ctx, 0, fs * 0.95, fs * 0.42, fs * 0.18, '#fde047'); }
+      if (v.t === 'stars') { ctx.font = `800 ${fs}px sans-serif`; ctx.fillText(fmt(v.a), 0, -fs * 0.18); ctx.shadowBlur = 0; wStar(ctx, 0, fs * 0.95, fs * 0.42, fs * 0.18, '#fde047'); }
+      else if (v.t === 'coins') { ctx.font = `800 ${fs}px sans-serif`; ctx.fillText(String(v.a), 0, -fs * 0.18); ctx.shadowBlur = 0; if (window.LotteryArt) { const ic = LotteryArt.coin(40); ctx.drawImage(ic, -fs * 0.45, fs * 0.45, fs * 0.9, fs * 0.9); } }
       else { ctx.shadowBlur = 0; ctx.font = `${fs * 1.2}px sans-serif`; ctx.fillText('💨', 0, 0); }
       ctx.restore();
     });
@@ -333,9 +343,10 @@
     cb.classList.toggle('hidden', !pend);
     if (!pend) { spinClaim.sessionId = ''; return; }
     const left = Math.ceil((spinClaim.readyAt - Date.now()) / 1000);
-    if (!spinClaim.sessionId) { cb.textContent = tr('spinClaimAd', { n: fmt(pend.prize) }); cb.disabled = false; }
+    const pn = pend.coins ? pend.prize : fmt(pend.prize);
+    if (!spinClaim.sessionId) { cb.textContent = tr(pend.coins ? 'spinClaimAdCoins' : 'spinClaimAd', { n: pn }); cb.disabled = false; }
     else if (left > 0) { cb.textContent = tr('wait', { s: left }); cb.disabled = true; }
-    else { cb.textContent = tr('spinClaimGo', { n: fmt(pend.prize) }); cb.disabled = spinClaim.busy; }
+    else { cb.textContent = tr(pend.coins ? 'spinClaimGoCoins' : 'spinClaimGo', { n: pn }); cb.disabled = spinClaim.busy; }
   }
   async function spinWheel() {
     if (spinning || !S.spin.ready || S.spin.pending) return;
@@ -350,7 +361,7 @@
       $('wheelCanvas').style.transform = `rotate(${wheelRot}deg)`;
       await new Promise((rs) => setTimeout(rs, 4200));
       spinning = false; spinClaim.sessionId = ''; applyState(r.state);
-      if (r.prize > 0) { res.className = 'ok wheel-result'; res.textContent = tr('wonPending', { n: fmt(r.prize) }); haptic('success'); }
+      if (r.prize > 0) { res.className = 'ok wheel-result'; res.textContent = r.coins ? tr('wonPendingCoins', { n: r.prize }) : tr('wonPending', { n: fmt(r.prize) }); haptic('success'); }
       else { res.className = 'err wheel-result'; res.textContent = tr('lost'); }
     } catch (e) { spinning = false; res.className = 'err wheel-result'; res.textContent = errText(e); refreshState(); }
   }
@@ -371,13 +382,106 @@
     try {
       const r = await api('/api/spin/claim', { sessionId: spinClaim.sessionId });
       spinClaim.sessionId = ''; spinClaim.busy = false; applyState(r.state);
-      res.className = 'ok wheel-result'; res.textContent = tr('won', { n: fmt(r.prize) }); haptic('success');
+      res.className = 'ok wheel-result'; res.textContent = r.coins ? tr('wonCoins', { n: r.prize }) : tr('won', { n: fmt(r.prize) }); haptic('success');
     } catch (e) {
       spinClaim.busy = false;
       if (e.code === 'TOO_EARLY') spinClaim.readyAt = Date.now() + (e.data.retryMs || 1000) + 300;
       else spinClaim.sessionId = '';
       res.className = 'err wheel-result'; res.textContent = errText(e); renderWheelState();
     }
+  }
+
+  // ───────── lucky boxes (lottery) ─────────
+  const TIERS = ['gold', 'silver', 'bronze']; const MEDAL = { gold: '🥇', silver: '🥈', bronze: '🥉' };
+  const lot = { sig: '', revealing: false, busy: false, rows: {}, boxesBuilt: false };
+  const dhms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); const d = Math.floor(s / 86400); return (d ? d + ' · ' : '') + hms((s % 86400) * 1000); };
+  function lotMsg(cls, text) { const m = $('lotMsg'); m.className = 'lot-msg ' + (cls || ''); m.textContent = text || ''; }
+  function buildBoxes() {
+    if (lot.boxesBuilt || !window.LotteryArt) return; lot.boxesBuilt = true;
+    const wrap = $('vaultBoxes');
+    for (let i = 0; i < 3; i++) {
+      const b = el('button', 'vbox'); b.type = 'button'; b.dataset.i = i; b.setAttribute('aria-label', 'box ' + (i + 1));
+      const art = el('div', 'art'); art.innerHTML = LotteryArt.boxSVG('v' + i); // static markup, no user data
+      const prize = el('div', 'prize'); b.append(art, prize); b.addEventListener('click', () => openBox(i)); wrap.append(b);
+    }
+  }
+  function renderLottery() {
+    const L = S && S.lottery; if (!L || !window.LotteryArt) return;
+    buildBoxes();
+    $('lotCoins').textContent = String(S.coins || 0);
+    $('lotPrizes').innerHTML = rich(tr('lotPrizes', { g: fmt(L.prizeCaps.gold), s: fmt(L.prizeCaps.silver), b: fmt(L.prizeCaps.bronze) }));
+    // tickets: rebuilt only when the pieces (or the language) change
+    const per = L.perTicket; const sig = lang + '|' + TIERS.map((t) => L.pieces[t]).join(',') + '|' + per + '|' + L.maxTickets;
+    if (sig !== lot.sig) {
+      lot.sig = sig; const box = $('lotTix'); box.replaceChildren();
+      TIERS.forEach((t) => {
+        const p = L.pieces[t]; const done = Math.min(L.maxTickets, Math.floor(p / per)); const cur = p >= L.maxTickets * per ? 0 : p % per;
+        const w = el('div', 'tk ' + t); const hd = el('div', 'hd'); const r = el('div', 'r'); r.append(el('span', 'tn', tr('tier_' + t)));
+        const ic = el('span', 'ic'); for (let k = 0; k < L.maxTickets; k++) ic.append(LotteryArt.mini(t, k < done)); r.append(ic, el('small', '', tr('lotTickets', { n: done })));
+        hd.append(r, el('small', '', tr('lotPieces', { a: cur, b: per, p: Math.round((cur / per) * 100) })));
+        const pic = el('div', 'pic'); pic.append(LotteryArt.ticketCanvas(t, per === 9 ? cur : Math.round((cur / per) * 9), 358, 150));
+        w.append(hd, pic); box.append(w);
+      });
+    }
+    // vault: blurred until a box has been paid for
+    const unlocked = L.pendingBox || lot.revealing; $('vault').classList.toggle('locked', !unlocked);
+    const ub = $('unlockBtn'); ub.replaceChildren(el('span', '', tr('lotUnlock')), LotteryArt.coin(26), el('span', '', String(L.boxCost)));
+    const ended = L.event.ended; ub.disabled = lot.busy || !L.enabled || ended || L.boxesLeft <= 0 || S.coins < L.boxCost;
+    if (!lot.revealing) $('vaultHint').textContent = L.pendingBox ? tr('lotPick') : '';
+    tickLot();
+  }
+  function tickLot() {
+    const L = S && S.lottery; if (!L) return;
+    const left = L.event.endAt - srvNow(); $('lotTimer').textContent = left > 0 ? dhms(left) : '00:00:00';
+    if (left <= 0 && !lot.refetch) { lot.refetch = true; setTimeout(() => { refreshState().then(() => { lot.refetch = false; }); }, 6000); lotMsg('warn', tr('lotEventEnded')); }
+  }
+  async function unlockBoxes() {
+    if (lot.busy) return; lot.busy = true; lotMsg('', '');
+    try { const r = await api('/api/lottery/unlock', {}); lot.busy = false; applyState(r.state); haptic('success'); }
+    catch (e) { lot.busy = false; lotMsg('err', errText(e)); refreshState(); }
+  }
+  async function openBox(i) {
+    if (lot.busy || lot.revealing || !S.lottery.pendingBox) return; lot.busy = true; lotMsg('', '');
+    try {
+      const r = await api('/api/lottery/open', {}); lot.busy = false; lot.revealing = true;
+      const boxes = $('vaultBoxes').children;
+      for (let k = 0; k < boxes.length; k++) boxes[k].classList.toggle('picked', k === i), boxes[k].classList.toggle('faded', k !== i);
+      const pr = boxes[i].querySelector('.prize'); pr.replaceChildren(LotteryArt.gem(r.tier, 36), el('span', '', tr('tier_' + r.tier)));
+      $('vaultHint').textContent = tr('lotGot', { t: tr('tier_' + r.tier) }); haptic('success');
+      applyState(r.state);
+      setTimeout(() => { lot.revealing = false; for (const b of boxes) { b.classList.remove('picked', 'faded'); b.querySelector('.prize').replaceChildren(); } $('vaultHint').textContent = ''; renderLottery(); }, 2600);
+    } catch (e) { lot.busy = false; lotMsg('err', errText(e)); refreshState(); }
+  }
+  function openLotModal(title, bodyNodes) {
+    $('lotModalTitle').textContent = title; $('lotModalBody').replaceChildren(...bodyNodes); $('lotModal').classList.add('open');
+  }
+  const closeLotModal = () => $('lotModal').classList.remove('open');
+  function showConvert() {
+    const L = S.lottery; const rows = [['bronze', 'silver', L.convert.bronzeToSilver], ['silver', 'gold', L.convert.silverToGold]];
+    const nodes = rows.map(([a, b, n]) => {
+      const row = el('div', 'lot-row'); row.append(el('span', '', tr('lotConvertRow', { n, a: tr('tier_' + a), b: tr('tier_' + b) })));
+      const btn = el('button', '', tr('lotDoConvert')); btn.type = 'button'; btn.disabled = L.pieces[a] < n || L.pieces[b] >= L.maxTickets * L.perTicket;
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try { const r = await api('/api/lottery/convert', { from: a }); applyState(r.state); lotMsg('ok', tr('lotConverted', { t: tr('tier_' + b) })); closeLotModal(); haptic('success'); }
+        catch (e) { lotMsg('err', errText(e)); closeLotModal(); refreshState(); }
+      });
+      row.append(btn); return row;
+    });
+    openLotModal(tr('lotConvertTitle'), nodes);
+  }
+  function showLast() {
+    const last = S.lottery.last; const nodes = [];
+    if (!last) nodes.push(el('p', 'hint center', tr('lotNoLast')));
+    else {
+      TIERS.forEach((t) => { if (last.prizes[t] > 0) { const kv = el('div', 'lot-kv'); kv.append(el('span', '', MEDAL[t] + ' ' + tr('tier_' + t)), el('b', '', fmt(last.prizes[t]) + ' ⭐')); nodes.push(kv); } });
+      const wins = last.mine.filter((m) => m.kind === 'win'); const cons = last.mine.filter((m) => m.kind === 'consolation').reduce((a, m) => a + m.amount, 0);
+      wins.forEach((w) => nodes.push(el('p', 'ok center', tr('lotYouWon', { n: fmt(w.amount), t: tr('tier_' + w.tier) }))));
+      if (cons > 0) nodes.push(el('p', 'warn center', tr('lotConsol', { n: fmt(cons) })));
+      if (!wins.length && cons <= 0) nodes.push(el('p', 'hint center', last.joined ? tr('lotNoWin') : tr('lotNothing')));
+      nodes.push(el('p', 'lot-seed', tr('lotSeed')), el('p', 'lot-seed', 'seed: ' + last.seed), el('p', 'lot-seed', 'sha256: ' + last.seedHash));
+    }
+    openLotModal(tr('lotLastTitle'), nodes);
   }
 
   // ───────── referral / league / wallet ─────────
@@ -444,6 +548,7 @@
     refreshDaily();
     renderLeagueTimer();
     if (S.spin.pending) renderWheelState();
+    tickLot();
     Object.keys(cards).forEach(refreshCard);
   }
   let toastTimer = 0;
@@ -460,7 +565,7 @@
     $('settingsBtn').addEventListener('click', () => toggleModal(true));
     $('closeModal').addEventListener('click', () => toggleModal(false));
     $('settingsModal').addEventListener('click', (e) => { if (e.target === $('settingsModal')) toggleModal(false); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') toggleModal(false); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { toggleModal(false); closeLotModal(); } });
     $('langSelect').addEventListener('change', (e) => applyLang(e.target.value));
     $('dailyBtn').addEventListener('click', claimDaily);
     $('captchaBtn').addEventListener('click', submitCaptcha);
@@ -469,6 +574,11 @@
     $('spinBtn').addEventListener('click', spinWheel);
     $('spinClaimBtn').addEventListener('click', claimSpinPrize);
     $('withdrawBtn').addEventListener('click', requestWithdrawal);
+    $('unlockBtn').addEventListener('click', unlockBoxes);
+    $('convertBtn').addEventListener('click', showConvert);
+    $('lastBtn').addEventListener('click', showLast);
+    $('lotModalClose').addEventListener('click', closeLotModal);
+    $('lotModal').addEventListener('click', (e) => { if (e.target === $('lotModal')) closeLotModal(); });
     if (tg && tg.BackButton) tg.BackButton.onClick(() => switchTab('home'));
   }
 

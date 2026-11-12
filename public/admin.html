@@ -29,6 +29,8 @@
                 <button type="button" data-tab="users">👥 کاربران</button>
                 <button type="button" data-tab="wd">💸 برداشت‌ها <b id="wdBadge" class="badge hidden"></b></button>
                 <button type="button" data-tab="ads">📢 تبلیغات و کانال‌ها</button>
+                <button type="button" data-tab="wheel">🎡 گردونه شانس</button>
+                <button type="button" data-tab="lot">🎁 جعبه‌های شانس</button>
                 <button type="button" data-tab="act">⚡ فعالیت</button>
                 <button type="button" data-tab="log">📝 گزارش مدیریت</button>
             </nav>
@@ -85,6 +87,31 @@
                     <button class="btn primary" type="submit">ذخیره تنظیمات</button>
                 </form>
                 <p class="muted" id="adsHint"></p>
+            </section>
+
+            <section id="tab-wheel" class="tab">
+                <h2>🎡 گردونه شانس</h2>
+                <div id="wheelSummary" class="cards"></div>
+                <div class="card wheel-edit">
+                    <p class="muted">هر خانه‌ی گردونه: نوع جایزه (⭐ استارز / 🪙 سکه / پوچ)، مقدار و وزن. شانس هر خانه = وزن ÷ مجموع وزن‌ها. بین ۴ تا ۱۶ خانه. تغییرات بلافاصله در مینی‌اپ (حداکثر تا یک دقیقه) اعمال می‌شود؛ جایزه‌ی چرخش‌های در انتظار همان مقدار قبلی را می‌گیرد.</p>
+                    <div id="wheelRows"></div>
+                    <div class="row">
+                        <button type="button" class="btn small" id="wheelAdd">➕ افزودن خانه</button>
+                        <label class="inline">هر چند ⭐ درآمد = یک چرخش <input id="wheelEarn" type="number" min="1" step="0.5" dir="ltr"></label>
+                        <button type="button" class="btn primary" id="wheelSave">💾 ذخیره‌ی گردونه</button>
+                    </div>
+                    <p class="muted" id="wheelHint"></p>
+                </div>
+            </section>
+
+            <section id="tab-lot" class="tab">
+                <h2>🎁 جعبه‌های شانس (سکه ← تکه ← قرعه‌کشی)</h2>
+                <div id="lotSummary" class="cards"></div>
+                <div class="sec-head"><h2>⚙️ تنظیمات</h2></div>
+                <form id="lotForm" class="card form-grid lot-form"></form>
+                <div class="row"><button type="button" class="btn bad" id="lotDraw">⚡ پایان فوری رویداد و قرعه‌کشی همین حالا</button></div>
+                <h2>📜 تاریخچه‌ی قرعه‌کشی‌ها</h2>
+                <div id="lotHistory"></div>
             </section>
 
             <section id="tab-act" class="tab">

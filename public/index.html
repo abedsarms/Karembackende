@@ -9,6 +9,7 @@
     <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
     <script src="/i18n.js" defer></script>
     <script src="/bg.js" defer></script>
+    <script src="/lottery.js" defer></script>
     <script src="/app.js" defer></script>
 </head>
 <body class="loading">
@@ -38,9 +39,12 @@
                     <h1 class="brand-text">CA<span class="r-wrapper">R<span class="crown-star" aria-hidden="true">⭐</span></span>eM</h1>
                 </div>
             </div>
-            <div class="balance-badge" aria-live="polite">
-                <span aria-hidden="true">⭐</span>
-                <span id="userBalance">0</span>
+            <div class="header-right">
+                <div class="coin-badge" id="coinBadge" aria-live="polite"><span class="coin-slot" id="coinBadgeIco" aria-hidden="true"></span><span id="userCoins">0</span></div>
+                <div class="balance-badge" aria-live="polite">
+                    <span aria-hidden="true">⭐</span>
+                    <span id="userBalance">0</span>
+                </div>
             </div>
         </header>
 
@@ -104,6 +108,36 @@
                 </div>
                 <div class="leaderboard-list" id="leagueList"></div>
             </div>
+        </section>
+
+        <!-- Lucky boxes / lottery -->
+        <section id="tab-lottery" class="tab-content">
+            <div class="card lot-head">
+                <div class="lot-title-row">
+                    <h3 class="mt0" data-i18n="lotTitle">🎁 Lucky Boxes</h3>
+                    <span class="coin-chip"><span class="coin-slot" id="lotCoinIco" aria-hidden="true"></span><b id="lotCoins">0</b></span>
+                </div>
+                <div class="lot-timer"><span data-i18n="lotEnds">⏳ Event ends in</span><b id="lotTimer" dir="ltr">—</b></div>
+                <p class="hint rich lot-prizes" id="lotPrizes"></p>
+            </div>
+
+            <div class="vault locked" id="vault">
+                <div class="vault-boxes" id="vaultBoxes"></div>
+                <p class="vault-hint" id="vaultHint"></p>
+                <div class="gate" id="gate">
+                    <span class="lk" data-i18n="lotLocked">🔒 Pay to open the boxes</span>
+                    <button type="button" id="unlockBtn" class="pay"></button>
+                </div>
+            </div>
+            <p id="lotMsg" class="lot-msg" role="status" aria-live="polite"></p>
+
+            <div class="lot-tix" id="lotTix"></div>
+
+            <div class="lot-actions">
+                <button type="button" id="convertBtn" class="lot-act lot-act-main" data-i18n="lotConvert">🔄 Convert pieces</button>
+                <button type="button" id="lastBtn" class="lot-act" data-i18n="lotLast">🏆 Last result</button>
+            </div>
+            <p class="hint center lot-note" data-i18n="lotNote">Prizes are drawn automatically when the event ends. Winning is not guaranteed — play only for fun.</p>
         </section>
 
         <!-- Wheel -->
@@ -173,12 +207,23 @@
         </div>
     </div>
 
+    <div id="lotModal" class="lot-modal" role="dialog" aria-modal="true" aria-labelledby="lotModalTitle">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="lotModalTitle"></h3>
+                <button type="button" class="close-modal" id="lotModalClose" data-i18n-aria="close" aria-label="Close">✕</button>
+            </div>
+            <div id="lotModalBody"></div>
+        </div>
+    </div>
+
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <nav class="bottom-nav" aria-label="main">
         <button type="button" class="nav-item active" data-tab="home"><span class="icon" aria-hidden="true">🏠</span><span data-i18n="navHome">Home</span></button>
         <button type="button" class="nav-item" data-tab="ref"><span class="icon" aria-hidden="true">👥</span><span data-i18n="navRef">Referral</span></button>
         <button type="button" class="nav-item" data-tab="league"><span class="icon" aria-hidden="true">🏆</span><span data-i18n="navLeague">League</span></button>
+        <button type="button" class="nav-item" data-tab="lottery"><span class="icon" aria-hidden="true">🎁</span><span data-i18n="navLottery">Boxes</span></button>
         <button type="button" class="nav-item" data-tab="wheel"><span class="icon" aria-hidden="true">🎡</span><span data-i18n="navWheel">Wheel</span></button>
         <button type="button" class="nav-item" data-tab="wallet"><span class="icon" aria-hidden="true">💰</span><span data-i18n="navWallet">Wallet</span></button>
     </nav>

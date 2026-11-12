@@ -182,3 +182,53 @@ window.I18N = {
     e_NOT_FOUND: '❌ Не найдено.', e_BAD_TASK: '❌ Неизвестное задание.',
   },
 };
+
+/* coins + lucky boxes */
+Object.assign(window.I18N.en, {
+    navLottery: 'Boxes', coinsUnit: '🪙', claimedCoins: '✅ Reward claimed (+{n} 🪙)', claimedHalfCoins: '✅ Half reward claimed (+{n} 🪙) — you did not click the ad.', coinTag: 'Coins',
+    wonPendingCoins: '🎉 You won {n} 🪙! Watch a short ad to receive it.', spinClaimAdCoins: '📺 Watch ad to claim {n} 🪙', spinClaimGoCoins: '✅ Claim {n} 🪙', wonCoins: '🎉 Congratulations! You won {n} 🪙!',
+    lotTitle: '🎁 Lucky Boxes', lotEnds: '⏳ Event ends in', lotLocked: '🔒 Pay to open the boxes', lotPick: 'Pick one of the three boxes · all are identical',
+    lotPrizes: 'Prizes (up to): 🥇 **{g} ⭐** · 🥈 **{s} ⭐** · 🥉 **{b} ⭐** — one winner per ticket type', lotUnlock: 'Open', lotPieces: '{a} of {b} pieces · {p}%', lotTickets: '{n} tickets',
+    lotConvert: '🔄 Convert pieces', lotLast: '🏆 Last result', lotNote: 'Prizes are drawn automatically when the event ends. Winning is not guaranteed — play only for fun.',
+    tier_gold: 'Gold', tier_silver: 'Silver', tier_bronze: 'Bronze', lotGot: 'You got a {t} piece!', lotConvertTitle: '🔄 Convert pieces', lotConvertRow: '{n} {a} pieces → 1 {b} piece', lotDoConvert: 'Convert', lotConverted: '✅ Converted: 1 {t} piece added.',
+    lotLastTitle: '🏆 Last event result', lotNoLast: 'No finished event yet.', lotYouWon: '🎉 You won {n} ⭐ in the {t} draw!', lotConsol: 'Consolation for tickets that did not win: {n} ⭐', lotNothing: 'You had no complete ticket in that event.', lotNoWin: 'No prize for you this time.',
+    lotPrizeOf: '{t} prize: {n} ⭐', lotSeed: 'Draw seed (anyone can verify it matches the hash published at the start):', lotEventEnded: 'The event has ended — the draw is running…',
+    e_NO_COINS: '❌ Not enough coins.', e_PENDING_BOX: '❌ Pick one of the unlocked boxes first.', e_NO_BOX: '❌ No unlocked box.', e_EVENT_ENDED: '❌ The event has ended, the draw is running.', e_DAILY_LIMIT: '❌ Daily box limit reached.',
+    e_ALL_CAPPED: '❌ You reached the ticket limit.', e_NOT_ENOUGH: '❌ Not enough pieces.', e_DISABLED: '❌ This feature is switched off.', e_FLAGGED: '❌ Not available for this account.', e_BAD_TIER: '❌ Invalid.',
+});
+Object.assign(window.I18N.fa, {
+    navLottery: 'جعبه‌ها', coinsUnit: '🪙', claimedCoins: '✅ پاداش دریافت شد (+{n} 🪙)', claimedHalfCoins: '✅ نصف پاداش دریافت شد (+{n} 🪙) — روی تبلیغ کلیک نکردید.', coinTag: 'سکه',
+    wonPendingCoins: '🎉 برنده‌ی {n} 🪙 شدید! برای دریافت یک تبلیغ کوتاه ببینید.', spinClaimAdCoins: '📺 دیدن تبلیغ و دریافت {n} 🪙', spinClaimGoCoins: '✅ دریافت {n} 🪙', wonCoins: '🎉 تبریک! {n} 🪙 برنده شدید!',
+    lotTitle: '🎁 جعبه‌های شانس', lotEnds: '⏳ پایان رویداد', lotLocked: '🔒 برای باز کردن جعبه‌ها پرداخت کنید', lotPick: 'یکی از سه جعبه را انتخاب کن · هر سه یکسان‌اند',
+    lotPrizes: 'جایزه‌ها (تا سقف): 🥇 **{g} ⭐** · 🥈 **{s} ⭐** · 🥉 **{b} ⭐** — برای هر نوع بلیط یک برنده', lotUnlock: 'باز کردن', lotPieces: '{a} از {b} تکه · {p}٪', lotTickets: '{n} بلیط',
+    lotConvert: '🔄 تبدیل تکه‌ها', lotLast: '🏆 نتیجه‌ی دوره‌ی قبل', lotNote: 'جایزه‌ها پس از پایان رویداد به‌صورت خودکار قرعه‌کشی می‌شوند. برنده‌شدن تضمینی نیست — فقط برای سرگرمی.',
+    tier_gold: 'طلایی', tier_silver: 'نقره‌ای', tier_bronze: 'برنزی', lotGot: 'یک تکه‌ی {t} گرفتی!', lotConvertTitle: '🔄 تبدیل تکه‌ها', lotConvertRow: '{n} تکه‌ی {a} ← ۱ تکه‌ی {b}', lotDoConvert: 'تبدیل', lotConverted: '✅ تبدیل شد: یک تکه‌ی {t} اضافه شد.',
+    lotLastTitle: '🏆 نتیجه‌ی آخرین رویداد', lotNoLast: 'هنوز رویدادی پایان نیافته است.', lotYouWon: '🎉 در قرعه‌کشی {t} برنده‌ی {n} ⭐ شدید!', lotConsol: 'جایزه‌ی تسلیت بلیط‌های برنده‌نشده: {n} ⭐', lotNothing: 'در آن رویداد بلیط کامل نداشتید.', lotNoWin: 'این بار جایزه‌ای نصیب شما نشد.',
+    lotPrizeOf: 'جایزه‌ی {t}: {n} ⭐', lotSeed: 'مقدار seed قرعه‌کشی (هرکس می‌تواند تطابقش را با هش اعلام‌شده در ابتدای رویداد بسنجد):', lotEventEnded: 'رویداد تمام شد — قرعه‌کشی در حال انجام است…',
+    e_NO_COINS: '❌ سکه‌ی کافی ندارید.', e_PENDING_BOX: '❌ ابتدا یکی از جعبه‌های باز را انتخاب کنید.', e_NO_BOX: '❌ جعبه‌ی بازی وجود ندارد.', e_EVENT_ENDED: '❌ رویداد تمام شده و قرعه‌کشی در حال انجام است.', e_DAILY_LIMIT: '❌ به سقف روزانه‌ی باز کردن جعبه رسیدید.',
+    e_ALL_CAPPED: '❌ به سقف تعداد بلیط رسیدید.', e_NOT_ENOUGH: '❌ تکه‌ی کافی ندارید.', e_DISABLED: '❌ این بخش فعلاً غیرفعال است.', e_FLAGGED: '❌ برای این حساب در دسترس نیست.', e_BAD_TIER: '❌ نامعتبر.',
+});
+Object.assign(window.I18N.ar, {
+    navLottery: 'الصناديق', coinsUnit: '🪙', claimedCoins: '✅ تم استلام المكافأة (+{n} 🪙)', claimedHalfCoins: '✅ تم استلام نصف المكافأة (+{n} 🪙) — لم تضغط على الإعلان.', coinTag: 'عملات',
+    wonPendingCoins: '🎉 ربحت {n} 🪙! شاهد إعلانًا قصيرًا لاستلامها.', spinClaimAdCoins: '📺 شاهد الإعلان لاستلام {n} 🪙', spinClaimGoCoins: '✅ استلام {n} 🪙', wonCoins: '🎉 مبروك! ربحت {n} 🪙!',
+    lotTitle: '🎁 صناديق الحظ', lotEnds: '⏳ ينتهي الحدث خلال', lotLocked: '🔒 ادفع لفتح الصناديق', lotPick: 'اختر أحد الصناديق الثلاثة · كلها متطابقة',
+    lotPrizes: 'الجوائز (حتى): 🥇 **{g} ⭐** · 🥈 **{s} ⭐** · 🥉 **{b} ⭐** — فائز واحد لكل نوع تذكرة', lotUnlock: 'فتح', lotPieces: '{a} من {b} قطع · {p}٪', lotTickets: '{n} تذاكر',
+    lotConvert: '🔄 تحويل القطع', lotLast: '🏆 النتيجة السابقة', lotNote: 'تُسحب الجوائز تلقائيًا عند انتهاء الحدث. الفوز غير مضمون — العب للمتعة فقط.',
+    tier_gold: 'ذهبية', tier_silver: 'فضية', tier_bronze: 'برونزية', lotGot: 'حصلت على قطعة {t}!', lotConvertTitle: '🔄 تحويل القطع', lotConvertRow: '{n} قطع {a} ← قطعة {b} واحدة', lotDoConvert: 'تحويل', lotConverted: '✅ تم التحويل: أُضيفت قطعة {t}.',
+    lotLastTitle: '🏆 نتيجة آخر حدث', lotNoLast: 'لا يوجد حدث منتهٍ بعد.', lotYouWon: '🎉 ربحت {n} ⭐ في سحب {t}!', lotConsol: 'جائزة تعزية للتذاكر غير الفائزة: {n} ⭐', lotNothing: 'لم تكن لديك تذكرة كاملة في ذلك الحدث.', lotNoWin: 'لا جائزة لك هذه المرة.',
+    lotPrizeOf: 'جائزة {t}: {n} ⭐', lotSeed: 'بذرة السحب (يمكن للجميع التحقق من تطابقها مع الهاش المعلن في البداية):', lotEventEnded: 'انتهى الحدث — السحب جارٍ…',
+    e_NO_COINS: '❌ لا تملك عملات كافية.', e_PENDING_BOX: '❌ اختر أولًا أحد الصناديق المفتوحة.', e_NO_BOX: '❌ لا يوجد صندوق مفتوح.', e_EVENT_ENDED: '❌ انتهى الحدث والسحب جارٍ.', e_DAILY_LIMIT: '❌ بلغت الحد اليومي للصناديق.',
+    e_ALL_CAPPED: '❌ بلغت حد التذاكر.', e_NOT_ENOUGH: '❌ قطع غير كافية.', e_DISABLED: '❌ هذه الميزة متوقفة.', e_FLAGGED: '❌ غير متاح لهذا الحساب.', e_BAD_TIER: '❌ غير صالح.',
+});
+Object.assign(window.I18N.ru, {
+    navLottery: 'Боксы', coinsUnit: '🪙', claimedCoins: '✅ Награда получена (+{n} 🪙)', claimedHalfCoins: '✅ Получена половина награды (+{n} 🪙) — вы не нажали на рекламу.', coinTag: 'Монеты',
+    wonPendingCoins: '🎉 Вы выиграли {n} 🪙! Посмотрите короткую рекламу, чтобы получить.', spinClaimAdCoins: '📺 Смотреть рекламу и получить {n} 🪙', spinClaimGoCoins: '✅ Получить {n} 🪙', wonCoins: '🎉 Поздравляем! Вы выиграли {n} 🪙!',
+    lotTitle: '🎁 Счастливые боксы', lotEnds: '⏳ До конца события', lotLocked: '🔒 Заплатите, чтобы открыть боксы', lotPick: 'Выберите один из трёх боксов · все одинаковые',
+    lotPrizes: 'Призы (до): 🥇 **{g} ⭐** · 🥈 **{s} ⭐** · 🥉 **{b} ⭐** — один победитель на тип билета', lotUnlock: 'Открыть', lotPieces: '{a} из {b} частей · {p}%', lotTickets: 'Билетов: {n}',
+    lotConvert: '🔄 Обмен частей', lotLast: '🏆 Прошлый результат', lotNote: 'Призы разыгрываются автоматически по окончании события. Выигрыш не гарантирован — играйте для удовольствия.',
+    tier_gold: 'Золотой', tier_silver: 'Серебряный', tier_bronze: 'Бронзовый', lotGot: 'Вы получили часть: {t}!', lotConvertTitle: '🔄 Обмен частей', lotConvertRow: '{n} частей ({a}) → 1 часть ({b})', lotDoConvert: 'Обменять', lotConverted: '✅ Обмен выполнен: добавлена часть {t}.',
+    lotLastTitle: '🏆 Итог последнего события', lotNoLast: 'Завершённых событий пока нет.', lotYouWon: '🎉 Вы выиграли {n} ⭐ в розыгрыше {t}!', lotConsol: 'Утешительный приз за невыигравшие билеты: {n} ⭐', lotNothing: 'В том событии у вас не было полного билета.', lotNoWin: 'В этот раз приза нет.',
+    lotPrizeOf: 'Приз {t}: {n} ⭐', lotSeed: 'Seed розыгрыша (можно проверить по хэшу, опубликованному в начале):', lotEventEnded: 'Событие завершено — идёт розыгрыш…',
+    e_NO_COINS: '❌ Недостаточно монет.', e_PENDING_BOX: '❌ Сначала выберите один из открытых боксов.', e_NO_BOX: '❌ Нет открытого бокса.', e_EVENT_ENDED: '❌ Событие завершено, идёт розыгрыш.', e_DAILY_LIMIT: '❌ Достигнут дневной лимит боксов.',
+    e_ALL_CAPPED: '❌ Достигнут лимит билетов.', e_NOT_ENOUGH: '❌ Недостаточно частей.', e_DISABLED: '❌ Функция отключена.', e_FLAGGED: '❌ Недоступно для этого аккаунта.', e_BAD_TIER: '❌ Неверно.',
+});

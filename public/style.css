@@ -760,3 +760,61 @@ select.styled { width: 100%; background: rgba(15, 12, 27, .8); border: 1px solid
 .container, .main-above { position: relative; z-index: 1; }
 body.loading .container, body.loading .bottom-nav { visibility: hidden; }
 .card { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+
+/* ───────── coins, coin tasks, lucky boxes ───────── */
+.header-right { display: flex; align-items: center; gap: 6px; }
+.coin-badge { display: flex; align-items: center; gap: 5px; padding: 6px 10px; border-radius: 30px; font-weight: bold; font-size: 14px; color: #67e8f9;
+  background: rgba(34, 211, 238, .12); border: 1px solid rgba(34, 211, 238, .4); box-shadow: 0 4px 15px rgba(34, 211, 238, .15); }
+.coin-slot, .coin-ico { display: inline-flex; vertical-align: middle; }
+.reward-badge.coin { display: inline-flex; align-items: center; gap: 4px; background: rgba(34, 211, 238, .16); color: #67e8f9; border-color: rgba(34, 211, 238, .45); }
+/* a task that pays coins gets a teal frame instead of the usual one */
+.card.coin-card { border: 1.5px solid rgba(34, 211, 238, .55); background: linear-gradient(135deg, rgba(8, 47, 73, .85), rgba(30, 27, 75, .7)); box-shadow: 0 8px 32px rgba(0, 0, 0, .4), 0 0 22px rgba(34, 211, 238, .18); }
+.coin-card .play-box { background: linear-gradient(135deg, #06b6d4, #0e7490); box-shadow: 0 4px 15px rgba(6, 182, 212, .4); }
+.coin-card .play-box.disabled { background: #475569 !important; box-shadow: none; }
+.coin-card .btn-green { background: linear-gradient(135deg, #22d3ee, #0891b2); }
+.coin-tag { display: inline-block; font-size: 10px; font-weight: bold; padding: 2px 8px; border-radius: 10px; margin-inline-start: 6px; color: #083344; background: #67e8f9; vertical-align: middle; }
+
+.bottom-nav .nav-item { min-width: 48px; padding: 4px 3px; font-size: 10px; }
+.lot-head .lot-title-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.coin-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 12px 4px 7px; font-weight: 800; font-size: 14px; background: rgba(99, 102, 241, .22); border: 1px solid rgba(168, 139, 250, .4); }
+.lot-timer { display: flex; justify-content: space-between; align-items: center; border-radius: 14px; padding: 9px 12px; font-size: 12px; background: rgba(99, 102, 241, .2); border: 1px solid rgba(168, 139, 250, .4); }
+.lot-timer b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.lot-prizes { margin: 10px 0 0; }
+.vault { position: relative; margin: 6px 0 4px; border-radius: 22px; padding: 6px 0 4px; }
+.vault-boxes { display: flex; justify-content: space-around; padding: 10px 4px 0; transition: filter .3s; }
+.vault.locked .vault-boxes, .vault.locked .vault-hint { filter: blur(5px); pointer-events: none; }
+.vbox { width: 30%; max-width: 100px; text-align: center; background: none; border: none; box-shadow: none; padding: 0; cursor: pointer; color: #fff; transition: transform .15s, opacity .3s; }
+.vbox svg { width: 100%; height: auto; display: block; overflow: visible; filter: drop-shadow(0 6px 14px rgba(139, 92, 246, .45)); }
+.vbox:active { transform: scale(.94); }
+.vbox.picked { transform: scale(1.12); }
+.vbox.faded { opacity: .25; pointer-events: none; }
+.vbox .prize { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; font-weight: 800; min-height: 40px; }
+.vault-hint { text-align: center; font-size: 12px; opacity: .8; margin: 8px 0 4px; min-height: 18px; }
+.gate { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 4; border-radius: 22px; background: rgba(10, 6, 30, .28); border: 1px solid rgba(168, 139, 250, .25); }
+.vault:not(.locked) .gate { display: none; }
+.gate .lk { font-size: 13px; font-weight: 700; }
+.pay { display: inline-flex; align-items: center; gap: 10px; font-weight: 900; font-size: 16px; padding: 8px 12px 8px 20px; border: none; width: auto; border-radius: 999px; color: #fff; cursor: pointer;
+  background: linear-gradient(90deg, #6366f1, #a855f7); box-shadow: 0 5px 0 #3730a3, 0 12px 26px rgba(139, 92, 246, .6); }
+.pay:disabled { opacity: .55; box-shadow: none; cursor: not-allowed; }
+.lot-msg { text-align: center; font-size: 13px; font-weight: 700; min-height: 20px; margin: 4px 0 6px; }
+.lot-tix { display: flex; flex-direction: column; gap: 12px; margin-top: 6px; }
+.tk .hd { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 13px; font-weight: 800; }
+.tk .hd .r { display: flex; align-items: center; gap: 8px; }
+.tk .hd small { font-weight: 600; opacity: .8; font-size: 11.5px; }
+.tk .ic { display: inline-flex; gap: 4px; align-items: center; }
+.tk .ic canvas { display: block; }
+.tk .pic { display: block; width: 100%; }
+.tk .pic canvas { display: block; width: 100% !important; height: auto !important; }
+.tk.gold .tn { color: #fde047; } .tk.silver .tn { color: #cfe0f6; } .tk.bronze .tn { color: #f59a5b; }
+.lot-actions { display: flex; gap: 10px; margin-top: 14px; }
+.lot-act { flex: 1; width: auto; text-align: center; font-weight: 800; font-size: 13px; padding: 11px 6px; border-radius: 14px; color: #fff; cursor: pointer; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .2); box-shadow: none; }
+.lot-act-main { background: linear-gradient(90deg, #6366f1, #a855f7); border: none; box-shadow: 0 4px 0 #3730a3; }
+.lot-note { margin-top: 14px; }
+.lot-modal { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, .7); backdrop-filter: blur(8px); z-index: 2000; justify-content: center; align-items: center; padding: 16px; }
+.lot-modal.open { display: flex; }
+.lot-modal .modal-content { max-height: 86vh; overflow-y: auto; }
+.lot-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: rgba(255, 255, 255, .06); border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; font-size: 13px; }
+.lot-row button { width: auto; padding: 8px 14px; border-radius: 10px; border: none; color: #fff; font-weight: 800; cursor: pointer; background: linear-gradient(90deg, #6366f1, #a855f7); }
+.lot-row button:disabled { opacity: .45; cursor: not-allowed; }
+.lot-kv { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 6px 0; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+.lot-seed { direction: ltr; font-size: 10px; word-break: break-all; opacity: .7; margin-top: 8px; }
