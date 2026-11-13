@@ -895,3 +895,12 @@ body.loading .container, body.loading .bottom-nav { visibility: hidden; }
 @keyframes stLabel { from { opacity: 0; transform: translateY(14px); } }
 .vbox .beam { transform: scaleY(.4); transform-origin: 50px 52px; }
 .vbox.open .beam { opacity: .45; }
+
+.lot-rare { margin-top: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, .05); border: 1px solid rgba(168, 139, 250, .2); display: flex; flex-direction: column; gap: 7px; }
+.rare-t { font-size: 12px; font-weight: 800; opacity: .85; }
+.rare-r { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.rare-r b { min-width: 52px; }
+.rare-bar { flex: 1; height: 8px; border-radius: 6px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+.rare-bar i { display: block; height: 100%; border-radius: 6px; background: #f59a5b; }
+.rare-r.silver .rare-bar i { background: #cfe0f6; } .rare-r.gold .rare-bar i { background: #fde047; box-shadow: 0 0 8px #fde047; }
+.rare-v { min-width: 84px; text-align: end; font-weight: 700; white-space: nowrap; }

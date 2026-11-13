@@ -410,6 +410,17 @@
     buildBoxes();
     $('lotCoins').textContent = String(S.coins || 0);
     $('lotPrizes').innerHTML = rich(tr('lotPrizes', { g: fmt(L.prizeCaps.gold), s: fmt(L.prizeCaps.silver), b: fmt(L.prizeCaps.bronze) }));
+    const rare = $('lotRare'); const rsig = lang + '|' + TIERS.map((t) => L.chances[t]).join(',');
+    if (rare.dataset.sig !== rsig) {
+      rare.dataset.sig = rsig; rare.replaceChildren(el('div', 'rare-t', tr('lotRare')));
+      const sum = TIERS.reduce((a, t) => a + (L.chances[t] || 0), 0) || 1;
+      [...TIERS].sort((a, b) => (L.chances[a] || 0) - (L.chances[b] || 0)).forEach((t) => {
+        const pct = (L.chances[t] || 0) / sum * 100; const row = el('div', 'rare-r ' + t);
+        const bar = el('span', 'rare-bar'); const fill = el('i'); fill.style.width = Math.max(3, pct) + '%'; bar.append(fill);
+        row.append(LotteryArt.gem(t, 22), el('b', '', tr('tier_' + t)), bar, el('span', 'rare-v', (pct % 1 ? pct.toFixed(1) : String(pct)) + '% · ' + tr('lotOneIn', { n: pct > 0 ? Math.round(100 / pct) : '∞' })));
+        rare.append(row);
+      });
+    }
     // tickets: rebuilt only when the pieces (or the language) change
     const per = L.perTicket; const sig = lang + '|' + TIERS.map((t) => L.pieces[t]).join(',') + '|' + per + '|' + L.maxTickets;
     if (sig !== lot.sig) {
