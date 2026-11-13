@@ -99,5 +99,9 @@ a.btn { text-decoration: none; display: inline-block; }
   td::before { content: attr(data-label); color: var(--muted); font-size: 12px; text-align: start; }
   td:not([data-label])::before, td[data-label=""]::before { display: none; }
   .url-cell { max-width: 60vw; }
+  td { overflow-wrap: anywhere; word-break: break-word; }
+  td > * { min-width: 0; max-width: 100%; }
+  td:last-child .btn.bad { margin-inline-start: auto; }
+  .tab, main { max-width: 100%; overflow-x: hidden; }
   .filters input[type=search] { min-width: 0; }
 }

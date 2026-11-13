@@ -384,13 +384,22 @@
   Object.entries(KIND).forEach(([k, v]) => { const o = el('option', '', v); o.value = k; $('actKind').append(o); });
   async function loadAct() {
     const r = await guard(() => api('/api/admin/activity?kind=' + encodeURIComponent($('actKind').value))); if (!r) return;
-    $('actTable').replaceChildren(table(['زمان', 'کاربر', 'نوع', 'مقدار ⭐', 'توضیح'], r.items.map((a) => [when(a.created_at), btn(userLabel({ id: a.user_id, first_name: a.first_name, username: a.username }), '', async () => openUser(a.user_id)), KIND[a.kind] || a.kind, signed(a.amount), a.ref || '—'])));
+    $('actTable').replaceChildren(table(['زمان', 'کاربر', 'نوع', 'مقدار ⭐', 'توضیح', ''], r.items.map((a) => [when(a.created_at), btn(userLabel({ id: a.user_id, first_name: a.first_name, username: a.username }), '', async () => openUser(a.user_id)), KIND[a.kind] || a.kind, signed(a.amount), a.ref || '—', btn('🗑', 'bad', async () => { if (await guard(() => api(`/api/admin/activity/${a.id}/hide`, {}))) loadAct(); })])));
   }
   $('actKind').addEventListener('change', loadAct);
+  $('actClear').addEventListener('click', async () => {
+    const k = $('actKind').value;
+    if (!confirm((k ? 'همه‌ی ردیف‌های این نوع' : 'همه‌ی ردیف‌های فعالیت') + ' از این نمایش پاک شوند؟\n(فقط از لیست مخفی می‌شود؛ موجودی و تراکنش‌های مالی کاربران دست‌نخورده می‌ماند.)')) return;
+    const r = await guard(() => api('/api/admin/activity/all/hide', { kind: k })); if (r) { toast(`${r.removed} مورد پاک شد`, 'good'); loadAct(); }
+  });
   async function loadLog() {
     const r = await guard(() => api('/api/admin/log')); if (!r) return;
-    $('logTable').replaceChildren(table(['زمان', 'عملیات', 'هدف', 'جزئیات'], r.items.map((l) => [when(l.at), l.action, num(l.target || '—'), l.detail || '—'])));
+    $('logTable').replaceChildren(table(['زمان', 'عملیات', 'هدف', 'جزئیات', ''], r.items.map((l) => [when(l.at), l.action, num(l.target || '—'), l.detail || '—', btn('🗑', 'bad', async () => { if (await guard(() => api(`/api/admin/log/${l.id}/delete`, {}))) loadLog(); })])));
   }
+  $('logClear').addEventListener('click', async () => {
+    if (!confirm('همه‌ی گزارش‌های مدیریت برای همیشه پاک شوند؟')) return;
+    const r = await guard(() => api('/api/admin/log/all/delete', {})); if (r) { toast(`${r.removed} مورد پاک شد`, 'good'); loadLog(); }
+  });
 
   // ───────── start ─────────
   if (token) enter();
