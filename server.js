@@ -57,7 +57,7 @@ const RULES = {
   captchaReward: 20, // paid for a correct captcha that was actually required
   spinWaitSec: num(env.SPIN_WAIT_SEC, 5),
   perTaskLimit: num(env.TASK_LIMIT, 10), // ads per window
-  windowMs: 8 * H,
+  windowMs: num(env.TASK_WINDOW_H, 8) * H, // rest period after an ad task hits its limit (global default)
   dailyMs: 24 * H,
   dailyReward: 100, // all amounts are integers in milli-stars (1 ⭐ = 1000)
   minWithdraw: 25000,
@@ -181,6 +181,8 @@ addColumn('devices', 'ip', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'debt', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('users', 'coins', 'INTEGER NOT NULL DEFAULT 0 CHECK(coins>=0)');
 addColumn('tasks', 'reward_type', "TEXT NOT NULL DEFAULT 'stars'");
+addColumn('tasks', 'max_count', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('tasks', 'window_h', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('task_limits', 'paid', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('task_limits', 'paid_coins', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('sessions', 'ptype', "TEXT NOT NULL DEFAULT 'stars'");
@@ -271,13 +273,14 @@ function loadTasks() {
   }
   for (const k of Object.keys(TASKS)) delete TASKS[k];
   for (const r of q('SELECT * FROM tasks ORDER BY type, sort, key').all()) {
-    TASKS[r.key] = { type: r.type, reward: r.reward, rewardType: r.reward_type === 'coins' ? 'coins' : 'stars', url: r.url, channel: r.channel, click: !!r.click, postback: !!r.postback, enabled: !!r.enabled };
+    TASKS[r.key] = { type: r.type, reward: r.reward, rewardType: r.reward_type === 'coins' ? 'coins' : 'stars', url: r.url, channel: r.channel, click: !!r.click, postback: !!r.postback, enabled: !!r.enabled, maxCount: r.max_count || 0, windowH: r.window_h || 0 };
   }
   const st = Object.fromEntries(q('SELECT key, value FROM settings').all().map((r) => [r.key, r.value]));
   if (st.spinAdUrl !== undefined) SETTINGS.spinAdUrl = st.spinAdUrl;
   if (st.payUrlStars) SETTINGS.payUrlStars = st.payUrlStars;
   if (st.payUrlGift) SETTINGS.payUrlGift = st.payUrlGift;
   if (st.perTaskLimit !== undefined && Number.isSafeInteger(+st.perTaskLimit) && +st.perTaskLimit > 0) RULES.perTaskLimit = +st.perTaskLimit;
+  if (st.windowH !== undefined && Number.isSafeInteger(+st.windowH) && +st.windowH > 0) RULES.windowMs = +st.windowH * H;
   if (st.spinEarn !== undefined && Number.isSafeInteger(+st.spinEarn) && +st.spinEarn >= 1) RULES.spinEarn = +st.spinEarn;
   if (st.wheel) { try { const w = sanitizeWheel(JSON.parse(st.wheel)); WHEEL.length = 0; WHEEL.push(...w); } catch { /* keep defaults */ } }
 }
@@ -403,11 +406,20 @@ function baseUrl(req) {
 }
 const fillUrl = (url, sid, uid) => (url || '').replaceAll('{sid}', sid).replaceAll('{uid}', String(uid));
 
+const limitOf = (def) => def.maxCount || RULES.perTaskLimit; // per-task override, else the global default
+const windowOf = (def) => (def.windowH ? def.windowH * H : RULES.windowMs);
+// if the admin lowered the limit (or the window) after a user already reached it, re-derive the reset time instead of locking the user forever
+function normLimit(lim, def, t) {
+  if (def.type !== 'ad' || lim.count < limitOf(def)) return lim;
+  const ra = lim.last_claim_at ? lim.last_claim_at + windowOf(def) : (lim.reset_at || t);
+  if (t >= ra) return { ...lim, count: 0, reset_at: 0 };
+  return { ...lim, reset_at: ra };
+}
 function checkTaskOpen(uid, key, def, t) {
   if (!taskAvailable(def)) fail(503, 'NOT_CONFIGURED');
-  const lim = limitRow(uid, key, t);
+  const lim = normLimit(limitRow(uid, key, t), def, t);
   if (def.type === 'sub' && lim.done) fail(409, 'ALREADY_DONE');
-  if (def.type === 'ad' && lim.count >= RULES.perTaskLimit) fail(429, 'LIMIT', { resetAt: lim.reset_at });
+  if (def.type === 'ad' && lim.count >= limitOf(def)) fail(429, 'LIMIT', { resetAt: lim.reset_at });
   return lim;
 }
 
@@ -434,10 +446,10 @@ function buildState(uid) {
   const tasks = {};
   for (const [key, def] of Object.entries(TASKS)) {
     if (!def.enabled) continue; // disabled tasks are hidden from users
-    const lim = limitRow(uid, key, t);
+    const lim = normLimit(limitRow(uid, key, t), def, t);
     tasks[key] = {
       type: def.type, reward: def.reward, rewardType: def.rewardType || 'stars', click: !!def.click, available: taskAvailable(def),
-      count: lim.count, max: def.type === 'ad' ? RULES.perTaskLimit : 1,
+      count: lim.count, max: def.type === 'ad' ? limitOf(def) : 1,
       resetAt: def.type === 'ad' ? lim.reset_at : 0, done: !!lim.done,
     };
   }
@@ -710,7 +722,7 @@ H_.taskClaim = async (c) => {
     lim.last_claim_at = t;
     if (def.type === 'ad') {
       lim.count += 1;
-      if (lim.count >= RULES.perTaskLimit) lim.reset_at = t + RULES.windowMs;
+      if (lim.count >= limitOf(def)) lim.reset_at = t + windowOf(def);
     } else lim.done = 1;
     saveLimit(user.id, key, lim);
     if (def.type === 'sub') q('UPDATE task_limits SET paid=?, paid_coins=?, last_check=? WHERE user_id=? AND task=?').run(def.reward, def.rewardType === 'coins' ? 1 : 0, t, user.id, key);
@@ -992,9 +1004,9 @@ const isHttps = (u) => typeof u === 'string' && u.length <= 500 && /^https:\/\/[
 const CHANNEL_RE = /^(@[A-Za-z][A-Za-z0-9_]{3,31}|-100\d{5,15})$/;
 const persistTask = (key) => {
   const d = TASKS[key];
-  q(`INSERT INTO tasks(key,type,reward,url,channel,click,postback,enabled,sort,updated_at,reward_type) VALUES(?,?,?,?,?,?,?,?,?,?,?)
-     ON CONFLICT(key) DO UPDATE SET reward=excluded.reward,reward_type=excluded.reward_type,url=excluded.url,channel=excluded.channel,click=excluded.click,postback=excluded.postback,enabled=excluded.enabled,updated_at=excluded.updated_at`)
-    .run(key, d.type, d.reward, d.url, d.channel, d.click ? 1 : 0, d.postback ? 1 : 0, d.enabled ? 1 : 0, Number(key.replace(/\D/g, '')) || 0, now(), d.rewardType === 'coins' ? 'coins' : 'stars');
+  q(`INSERT INTO tasks(key,type,reward,url,channel,click,postback,enabled,sort,updated_at,reward_type,max_count,window_h) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(key) DO UPDATE SET max_count=excluded.max_count,window_h=excluded.window_h,reward=excluded.reward,reward_type=excluded.reward_type,url=excluded.url,channel=excluded.channel,click=excluded.click,postback=excluded.postback,enabled=excluded.enabled,updated_at=excluded.updated_at`)
+    .run(key, d.type, d.reward, d.url, d.channel, d.click ? 1 : 0, d.postback ? 1 : 0, d.enabled ? 1 : 0, Number(key.replace(/\D/g, '')) || 0, now(), d.rewardType === 'coins' ? 'coins' : 'stars', d.maxCount || 0, d.windowH || 0);
 };
 H_.adminTasks = (c) => {
   const t = now();
@@ -1008,7 +1020,7 @@ H_.adminTasks = (c) => {
     sessions24: (sess[key] || {}).n || 0, clicks24: (sess[key] || {}).c || 0, subscribed: subs[key] || 0,
   }));
   return {
-    items, settings: { spinAdUrl: SETTINGS.spinAdUrl, perTaskLimit: RULES.perTaskLimit, payUrlStars: SETTINGS.payUrlStars, payUrlGift: SETTINGS.payUrlGift }, botConfigured: !!cfg.botToken,
+    items, settings: { spinAdUrl: SETTINGS.spinAdUrl, perTaskLimit: RULES.perTaskLimit, windowH: Math.round(RULES.windowMs / H), payUrlStars: SETTINGS.payUrlStars, payUrlGift: SETTINGS.payUrlGift }, botConfigured: !!cfg.botToken,
     postbackTemplate: cfg.postbackSecret ? `${baseUrl(c.req)}/api/postback?secret=${cfg.postbackSecret}&sid={sid}` : '',
   };
 };
@@ -1026,6 +1038,8 @@ function readTaskFields(b, cur) {
   if (b.url !== undefined) { const u = String(b.url).trim(); if (u && !isHttps(u)) fail(400, 'BAD_URL'); out.url = u; }
   if (b.enabled !== undefined) out.enabled = !!b.enabled;
   if (out.type === 'ad') {
+    if (b.maxCount !== undefined) { if (!Number.isSafeInteger(b.maxCount) || b.maxCount < 0 || b.maxCount > 1000) fail(400, 'BAD_AMOUNT'); out.maxCount = b.maxCount; }
+    if (b.windowH !== undefined) { if (!Number.isSafeInteger(b.windowH) || b.windowH < 0 || b.windowH > 720) fail(400, 'BAD_AMOUNT'); out.windowH = b.windowH; }
     if (b.click !== undefined) out.click = !!b.click;
     if (b.postback !== undefined) out.postback = !!b.postback;
     if (out.postback && !cfg.postbackSecret) fail(400, 'NO_POSTBACK_SECRET');
@@ -1041,7 +1055,7 @@ H_.adminTaskCreate = (c) => tx(() => {
     if (Object.values(TASKS).some((d) => d.type === 'sub' && d.channel.toLowerCase() === channel.toLowerCase())) fail(409, 'DUPLICATE');
     if (!isHttps(String(c.body.url || '').trim())) fail(400, 'BAD_URL');
   }
-  const base = { type, reward: 0, rewardType: 'stars', url: '', channel, click: false, postback: false, enabled: true };
+  const base = { type, reward: 0, rewardType: 'stars', url: '', channel, click: false, postback: false, enabled: true, maxCount: 0, windowH: 0 };
   if (c.body.reward_m === undefined) fail(400, 'BAD_AMOUNT');
   const d = readTaskFields(c.body, base);
   const used = [...Object.keys(TASKS), ...q('SELECT DISTINCT task FROM task_limits WHERE task LIKE ?').all(type + '%').map((r) => r.task)];
@@ -1069,7 +1083,8 @@ H_.adminSettings = (c) => {
     if (!/^(https:\/\/t\.me\/|tg:\/\/)/i.test(u.replace('{profile}', 'https://t.me/x'))) fail(400, 'BAD_URL'); SETTINGS[k] = u; saveSetting(k, u);
   }
   if (c.body.perTaskLimit !== undefined) { const n = c.body.perTaskLimit; if (!Number.isSafeInteger(n) || n < 1 || n > 1000) fail(400, 'BAD_AMOUNT'); RULES.perTaskLimit = n; saveSetting('perTaskLimit', n); }
-  logAdmin('settings', null, JSON.stringify({ spinAdUrl: SETTINGS.spinAdUrl, perTaskLimit: RULES.perTaskLimit }).slice(0, 200));
+  if (c.body.windowH !== undefined) { const n = c.body.windowH; if (!Number.isSafeInteger(n) || n < 1 || n > 720) fail(400, 'BAD_AMOUNT'); RULES.windowMs = n * H; saveSetting('windowH', n); }
+  logAdmin('settings', null, JSON.stringify({ spinAdUrl: SETTINGS.spinAdUrl, perTaskLimit: RULES.perTaskLimit, windowH: Math.round(RULES.windowMs / H) }).slice(0, 200));
   return { ok: true };
 };
 let botId = 0;
