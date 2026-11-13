@@ -181,6 +181,7 @@ addColumn('devices', 'ip', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'debt', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('users', 'coins', 'INTEGER NOT NULL DEFAULT 0 CHECK(coins>=0)');
 addColumn('tasks', 'reward_type', "TEXT NOT NULL DEFAULT 'stars'");
+addColumn('ledger', 'hidden', 'INTEGER NOT NULL DEFAULT 0'); // admin "clear" only hides a row from the Activity view; balances/audit trail stay intact
 addColumn('tasks', 'max_count', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('tasks', 'window_h', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('task_limits', 'paid', 'INTEGER NOT NULL DEFAULT 0');
@@ -455,7 +456,7 @@ function buildState(uid) {
   }
   const refs = q('SELECT COUNT(*) c, COALESCE(SUM(ref_rewarded),0) a FROM users WHERE referrer_id=?').get(uid);
   const { rank, score } = weeklyRank(uid, t);
-  const wd = q('SELECT id,amount,type,status,created_at,gift_name FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 5').all(uid);
+  const wd = q("SELECT id,amount,type,status,created_at,gift_name FROM withdrawals WHERE user_id=? ORDER BY (status='pending') DESC, id DESC LIMIT 50").all(uid);
   return {
     now: t,
     user: { id: u.id, name: u.first_name || u.username || String(u.id) },
@@ -996,7 +997,7 @@ H_.adminUser = (c) => {
 };
 H_.adminActivity = (c) => {
   const kind = (c.query.get('kind') || '').replace(/[^a-z_]/g, '');
-  const rows = q(`SELECT l.id, l.user_id, u.first_name, u.username, l.kind, l.amount, l.ref, l.created_at FROM ledger l JOIN users u ON u.id=l.user_id ${kind ? 'WHERE l.kind=?' : ''} ORDER BY l.id DESC LIMIT 150`);
+  const rows = q(`SELECT l.id, l.user_id, u.first_name, u.username, l.kind, l.amount, l.ref, l.created_at FROM ledger l JOIN users u ON u.id=l.user_id WHERE l.hidden=0 ${kind ? 'AND l.kind=?' : ''} ORDER BY l.id DESC LIMIT 150`);
   return { items: kind ? rows.all(kind) : rows.all() };
 };
 // ───────────────────────── admin: ads & channel tasks ─────────────────────────
@@ -1157,6 +1158,21 @@ H_.adminWheelSave = (c) => tx(() => {
   return { ok: true };
 });
 H_.adminLog = () => ({ items: q('SELECT * FROM admin_log ORDER BY id DESC LIMIT 100').all() });
+H_.adminLogDelete = (c) => {
+  const id = c.params.id;
+  if (id === 'all') { const n = q('DELETE FROM admin_log').run().changes; logAdmin('log_cleared', null, `${n} entries`); return { ok: true, removed: n }; }
+  return { ok: true, removed: q('DELETE FROM admin_log WHERE id=?').run(+id).changes };
+};
+// "clearing" the activity feed only hides rows from this view (the ledger is the financial record and is never deleted)
+H_.adminActivityHide = (c) => {
+  const id = c.params.id;
+  if (id === 'all') {
+    const kind = String(c.body.kind || '').replace(/[^a-z_]/g, '');
+    const n = (kind ? q('UPDATE ledger SET hidden=1 WHERE hidden=0 AND kind=?').run(kind) : q('UPDATE ledger SET hidden=1 WHERE hidden=0').run()).changes;
+    logAdmin('activity_cleared', kind || 'all', `${n} rows hidden`); return { ok: true, removed: n };
+  }
+  return { ok: true, removed: q('UPDATE ledger SET hidden=1 WHERE id=?').run(+id).changes };
+};
 const adminUserId = (c) => { const id = +c.params.id; if (!getUser(id)) fail(404, 'NOT_FOUND'); return id; };
 H_.adminFlag = (c) => { const id = adminUserId(c); const f = c.body.flagged ? 1 : 0; q('UPDATE users SET flagged=? WHERE id=?').run(f, id); logAdmin(f ? 'flag' : 'unflag', String(id)); return { ok: true, flagged: f }; };
 H_.adminResetDevices = (c) => { const id = adminUserId(c); const r = q('DELETE FROM devices WHERE user_id=?').run(id); logAdmin('reset_devices', String(id), `${r.changes} rows`); return { ok: true, removed: Number(r.changes) }; };
@@ -1278,6 +1294,8 @@ const ROUTES = [
   ['POST', /^\/api\/admin\/check-channel$/, H_.adminCheckChannel, 'admin'],
   ['GET', /^\/api\/admin\/activity$/, H_.adminActivity, 'admin'],
   ['GET', /^\/api\/admin\/log$/, H_.adminLog, 'admin'],
+  ['POST', /^\/api\/admin\/log\/(?<id>all|\d+)\/delete$/, H_.adminLogDelete, 'admin'],
+  ['POST', /^\/api\/admin\/activity\/(?<id>all|\d+)\/hide$/, H_.adminActivityHide, 'admin'],
   ['GET', /^\/api\/admin\/wheel$/, H_.adminWheel, 'admin'],
   ['POST', /^\/api\/admin\/wheel$/, H_.adminWheelSave, 'admin'],
   ['GET', /^\/api\/admin\/lottery$/, H_.adminLottery, 'admin'],
