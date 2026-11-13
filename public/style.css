@@ -818,3 +818,20 @@ body.loading .container, body.loading .bottom-nav { visibility: hidden; }
 .lot-row button:disabled { opacity: .45; cursor: not-allowed; }
 .lot-kv { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 6px 0; border-bottom: 1px solid rgba(255, 255, 255, .08); }
 .lot-seed { direction: ltr; font-size: 10px; word-break: break-all; opacity: .7; margin-top: 8px; }
+
+/* header: never let the logo wrap onto two lines (the coin badge made the row tighter) */
+.brand-logo { flex-shrink: 0; }
+.brand-text { white-space: nowrap; }
+.header-left { flex-shrink: 0; gap: 8px; }
+.header-right { min-width: 0; }
+.coin-badge, .balance-badge { white-space: nowrap; }
+@media (max-width: 420px) {
+  .profile-header { padding: 12px 10px; }
+  .header-left { gap: 6px; } .header-right { gap: 4px; }
+  .brand-logo { padding: 6px 10px; }
+  .brand-text { font-size: 17px; letter-spacing: 1.5px; }
+  .settings-btn { width: 32px; height: 32px; }
+  .coin-badge { padding: 5px 8px; font-size: 12.5px; gap: 3px; }
+  .balance-badge { padding: 5px 8px; font-size: 13px; }
+}
+@media (max-width: 350px) { .brand-text { font-size: 15px; letter-spacing: 1px; } .coin-badge .coin-ico { width: 15px; height: 15px; } }

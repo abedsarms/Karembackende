@@ -82,3 +82,22 @@ tr:last-child td { border-bottom: 0; } tbody tr.click { cursor: pointer; } tbody
 label.inline { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .lot-form { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); } .lot-form .btn, .lot-form p { grid-column: 1 / -1; }
 a.btn { text-decoration: none; display: inline-block; }
+
+/* phones: header = brand row + one scrollable row of tabs; tables become one card per row */
+@media (max-width: 700px) {
+  .top { gap: 8px; }
+  .brand { order: 1; } .top-actions { order: 2; margin-inline-start: auto; }
+  .tabs { order: 3; flex: 1 0 100%; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { flex: 0 0 auto; white-space: nowrap; padding: 7px 10px; font-size: 13px; }
+  .tbl-wrap { border: 0; background: transparent; overflow: visible; }
+  table, thead, tbody, tr, td { display: block; min-width: 0; width: 100%; }
+  thead { display: none; }
+  tbody tr { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 6px 12px; margin-bottom: 10px; }
+  td { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 12px; white-space: normal; border-bottom: 1px dashed var(--line); padding: 8px 0; text-align: end; }
+  tr td:last-child { border-bottom: 0; }
+  td::before { content: attr(data-label); color: var(--muted); font-size: 12px; text-align: start; }
+  td:not([data-label])::before, td[data-label=""]::before { display: none; }
+  .url-cell { max-width: 60vw; }
+  .filters input[type=search] { min-width: 0; }
+}

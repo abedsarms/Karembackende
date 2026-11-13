@@ -37,7 +37,7 @@
     const tb = el('tbody');
     rows.forEach((r, i) => {
       const tr = el('tr', onRow ? 'click' : ''); if (onRow) tr.addEventListener('click', () => onRow(i));
-      r.forEach((c) => { const td = el('td'); if (c instanceof Node) td.append(c); else td.textContent = c === null || c === undefined ? '—' : String(c); tr.append(td); });
+      r.forEach((c, ci) => { const td = el('td'); td.dataset.label = headers[ci] || ''; if (c instanceof Node) td.append(c); else td.textContent = c === null || c === undefined ? '—' : String(c); tr.append(td); });
       tb.append(tr);
     });
     t.append(tb); wrap.append(t); return wrap;
@@ -235,19 +235,19 @@
     const r = await guard(() => api('/api/admin/tasks')); if (!r) return; adsData = r;
     const state = (t) => (t.enabled ? tag('فعال', 'green') : tag('غیرفعال', 'red'));
     const ads = r.items.filter((t) => t.type === 'ad'); const subs = r.items.filter((t) => t.type === 'sub');
-    $('adsTable').replaceChildren(table(['#', 'وضعیت', 'پاداش', 'لینک تبلیغ', 'شرط', 'دریافت (۲۴س / کل)', 'کلیک ۲۴س', 'پرداختی'],
-      ads.map((t) => [num(t.key), state(t), num(rewardTxt(t), 'gold'), shortUrl(t.url), [t.click ? 'کلیک اجباری' : '', t.postback ? 'پست‌بک' : ''].filter(Boolean).join(' + ') || '—',
+    $('adsTable').replaceChildren(table(['#', 'وضعیت', 'پاداش', 'سقف', 'لینک تبلیغ', 'شرط', 'دریافت (۲۴س / کل)', 'کلیک ۲۴س', 'پرداختی'],
+      ads.map((t) => [num(t.key), state(t), num(rewardTxt(t), 'gold'), num(`${t.maxCount || r.settings.perTaskLimit} / ${t.windowH || r.settings.windowH}س`), shortUrl(t.url), [t.click ? 'کلیک اجباری' : '', t.postback ? 'پست‌بک' : ''].filter(Boolean).join(' + ') || '—',
         num(`${t.claims24} / ${t.claims}`), t.click ? num(`${t.clicks24} از ${t.sessions24}`) : '—', num(t.rewardType === 'coins' ? t.paid + ' 🪙' : stars(t.paid))]), (i) => openTask(ads[i])));
     $('subsTable').replaceChildren(table(['#', 'وضعیت', 'پاداش', 'کانال', 'لینک عضویت', 'عضو فعلی (از ثبت‌شده‌ها)', 'پرداختی'],
       subs.map((t) => [num(t.key), state(t), num(rewardTxt(t), 'gold'), num(t.channel), shortUrl(t.url), num(String(t.subscribed)), num(t.rewardType === 'coins' ? t.paid + ' 🪙' : stars(t.paid))]), (i) => openTask(subs[i])));
-    $('setLimit').value = r.settings.perTaskLimit; $('setSpinAd').value = r.settings.spinAdUrl || ''; $('setPayStars').value = r.settings.payUrlStars || '{profile}'; $('setPayGift').value = r.settings.payUrlGift || '{profile}';
+    $('setLimit').value = r.settings.perTaskLimit; $('setWindow').value = r.settings.windowH; $('setSpinAd').value = r.settings.spinAdUrl || ''; $('setPayStars').value = r.settings.payUrlStars || '{profile}'; $('setPayGift').value = r.settings.payUrlGift || '{profile}';
     $('adsHint').textContent = 'برای ویرایش، روی هر ردیف کلیک کنید. تغییرات تا حدود یک دقیقه بعد در مینی‌اپ کاربران اعمال می‌شود. تسک غیرفعال برای کاربران مخفی می‌شود.';
   }
   $('addAd').addEventListener('click', () => openTask(null, 'ad'));
   $('addSub').addEventListener('click', () => openTask(null, 'sub'));
   $('settingsForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (await guard(() => api('/api/admin/settings', { perTaskLimit: parseInt($('setLimit').value, 10), spinAdUrl: $('setSpinAd').value.trim(), payUrlStars: $('setPayStars').value.trim(), payUrlGift: $('setPayGift').value.trim() }))) { toast('ذخیره شد', 'good'); loadAds(); }
+    if (await guard(() => api('/api/admin/settings', { perTaskLimit: parseInt($('setLimit').value, 10), windowH: parseInt($('setWindow').value, 10), spinAdUrl: $('setSpinAd').value.trim(), payUrlStars: $('setPayStars').value.trim(), payUrlGift: $('setPayGift').value.trim() }))) { toast('ذخیره شد', 'good'); loadAds(); }
   });
 
   function openTask(t, type) {
@@ -282,13 +282,20 @@
     }
     const click = !isSub ? check('کلیک اجباری (بدون کلیک فقط نصف پاداش)', t ? t.click : false) : null;
     const postback = !isSub ? check('تایید با پست‌بک شبکه‌ی تبلیغاتی (بدون تایید شبکه پاداش داده نمی‌شود)', t ? t.postback : false) : null;
+    let maxc = null; let winh = null;
+    if (!isSub) {
+      maxc = el('input'); maxc.type = 'number'; maxc.min = '0'; maxc.max = '1000'; maxc.dir = 'ltr'; maxc.value = t ? t.maxCount : 0; maxc.placeholder = '0';
+      field(`تعداد دفعات مجاز برای هر کاربر در هر بازه (۰ = پیش‌فرض عمومی: ${adsData ? adsData.settings.perTaskLimit : ''})`, maxc);
+      winh = el('input'); winh.type = 'number'; winh.min = '0'; winh.max = '720'; winh.dir = 'ltr'; winh.value = t ? t.windowH : 0; winh.placeholder = '0';
+      field(`ساعت استراحت بعد از رسیدن به سقف (۰ = پیش‌فرض عمومی: ${adsData ? adsData.settings.windowH : ''})`, winh);
+    } else form.append(el('div', 'hintbox', 'تسک عضویت برای هر کاربر فقط یک‌بار قابل انجام است (سقف روزانه ندارد).'));
     const enabled = check('فعال (برای کاربران نمایش داده شود)', t ? t.enabled : true);
     if (!isSub) { const h = el('div', 'hintbox'); h.append('لینک پست‌بک برای شبکه‌ی تبلیغاتی: '); const c = el('code', '', adsData && adsData.postbackTemplate ? adsData.postbackTemplate : 'ابتدا ADS_POSTBACK_SECRET را در .env تنظیم کنید'); h.append(c, el('br'), 'رویداد کلیک: همان لینک با ', el('code', '', '&event=click')); form.append(h); }
     const save = el('button', 'btn primary', isNew ? 'افزودن' : 'ذخیره'); save.type = 'submit'; form.append(save);
     form.addEventListener('submit', async (e) => {
       e.preventDefault(); const coins = rtype.value === 'coins'; const m = coins ? Math.round(parseFloat(reward.value)) : Math.round(parseFloat(reward.value) * 1000);
       const b = { reward_type: rtype.value, reward_m: m, url: url.value.trim(), enabled: enabled.checked };
-      if (!isSub) { b.click = click.checked; b.postback = postback.checked; }
+      if (!isSub) { b.click = click.checked; b.postback = postback.checked; b.maxCount = parseInt(maxc.value, 10) || 0; b.windowH = parseInt(winh.value, 10) || 0; }
       if (isNew) { b.type = type; if (isSub) b.channel = channel.value.trim(); } else if (isSub && !t.channel) b.channel = channel.value.trim();
       if (await guard(() => api(isNew ? '/api/admin/tasks' : '/api/admin/tasks/' + t.key, b))) { toast('ذخیره شد', 'good'); drawer.classList.add('hidden'); loadAds(); }
     });
