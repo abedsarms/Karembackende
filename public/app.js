@@ -399,7 +399,7 @@
   function buildBoxes() {
     if (lot.boxesBuilt || !window.LotteryArt) return; lot.boxesBuilt = true;
     const wrap = $('vaultBoxes');
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 9; i++) {
       const b = el('button', 'vbox'); b.type = 'button'; b.dataset.i = i; b.setAttribute('aria-label', 'box ' + (i + 1));
       const art = el('div', 'art'); art.innerHTML = LotteryArt.boxSVG('v' + i); // static markup, no user data
       const prize = el('div', 'prize'); b.append(art, prize); b.addEventListener('click', () => openBox(i)); wrap.append(b);
@@ -440,16 +440,54 @@
     try { const r = await api('/api/lottery/unlock', {}); lot.busy = false; applyState(r.state); haptic('success'); }
     catch (e) { lot.busy = false; lotMsg('err', errText(e)); refreshState(); }
   }
+  // cosmetic layout of the other 8 boxes: 1 gold + 3 silver + 5 bronze in total, the picked box holds what the server rolled
+  function layoutFor(tier, i) {
+    const pool = ['gold', 'silver', 'silver', 'silver', 'bronze', 'bronze', 'bronze', 'bronze', 'bronze']; pool.splice(pool.indexOf(tier), 1);
+    for (let k = pool.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [pool[k], pool[j]] = [pool[j], pool[k]]; }
+    const out = []; for (let k = 0; k < 9; k++) out.push(k === i ? tier : pool.pop()); return out;
+  }
+  const FX = { bronze: { n: 8, ms: 2600, dist: 110 }, silver: { n: 20, ms: 3400, dist: 150 }, gold: { n: 44, ms: 4600, dist: 190 } };
+  function haptics(tier) {
+    const h = tg && tg.HapticFeedback; if (!h) return;
+    try {
+      if (tier === 'bronze') h.impactOccurred('light');
+      else if (tier === 'silver') { h.impactOccurred('medium'); setTimeout(() => h.notificationOccurred('success'), 450); }
+      else { h.impactOccurred('heavy'); [250, 500, 750].forEach((t) => setTimeout(() => h.impactOccurred('heavy'), t)); setTimeout(() => h.notificationOccurred('success'), 1000); }
+    } catch { /* ignore */ }
+  }
+  // the reveal: the box shakes, the lid flips open, the ticket piece rises out — richer for every tier
+  function playReveal(tier, done) {
+    const st = $('lotStage'); st.replaceChildren(); const fx = FX[tier];
+    const sc = el('div', 'st-scene t-' + tier);
+    const box = el('div', 'st-box'); box.innerHTML = LotteryArt.boxSVG('st'); // static markup, no user data
+    const piece = el('div', 'st-piece'); piece.append(LotteryArt.pieceCanvas(tier, 150, 96));
+    sc.append(el('div', 'st-rays'), el('div', 'st-glow'), el('div', 'st-flash'), box, piece);
+    for (let k = 0; k < fx.n; k++) {
+      let p; if (tier === 'gold' && k % 5 === 0) p = LotteryArt.coin(16); else p = el('i', 'st-p', ['✦', '★', '●'][k % (tier === 'bronze' ? 1 : 3)]);
+      p.classList.add('st-p'); const ang = Math.random() * Math.PI * 2, d = fx.dist * (0.45 + Math.random() * 0.75);
+      p.style.setProperty('--dx', Math.round(Math.cos(ang) * d) + 'px'); p.style.setProperty('--dy', Math.round(Math.sin(ang) * d - 40) + 'px');
+      p.style.setProperty('--r', Math.round(Math.random() * 540 - 270) + 'deg'); p.style.setProperty('--d', (0.55 + Math.random() * 0.5).toFixed(2) + 's'); p.style.setProperty('--s', (0.7 + Math.random() * 0.9).toFixed(2));
+      sc.append(p);
+    }
+    const lab = el('div', 'st-label'); lab.append(LotteryArt.gem(tier, 34), el('span', '', tr('lotGot', { t: tr('tier_' + tier) }))); sc.append(lab, el('div', 'st-tap', tr('lotTap')));
+    st.append(sc); st.classList.add('open'); void sc.offsetWidth; sc.classList.add('go'); haptics(tier);
+    let closed = false; const close = () => { if (closed) return; closed = true; st.classList.remove('open'); st.replaceChildren(); done(); };
+    const t = setTimeout(close, fx.ms); st.onclick = () => { if (sc.classList.contains('go') && Date.now() - t0 > 900) { clearTimeout(t); close(); } }; const t0 = Date.now();
+  }
   async function openBox(i) {
     if (lot.busy || lot.revealing || !S.lottery.pendingBox) return; lot.busy = true; lotMsg('', '');
     try {
       const r = await api('/api/lottery/open', {}); lot.busy = false; lot.revealing = true;
-      const boxes = $('vaultBoxes').children;
-      for (let k = 0; k < boxes.length; k++) boxes[k].classList.toggle('picked', k === i), boxes[k].classList.toggle('faded', k !== i);
-      const pr = boxes[i].querySelector('.prize'); pr.replaceChildren(LotteryArt.gem(r.tier, 36), el('span', '', tr('tier_' + r.tier)));
-      $('vaultHint').textContent = tr('lotGot', { t: tr('tier_' + r.tier) }); haptic('success');
+      const boxes = $('vaultBoxes').children; const lay = layoutFor(r.tier, i);
+      for (let k = 0; k < boxes.length; k++) boxes[k].classList.toggle('picked', k === i);
+      $('vaultHint').textContent = '';
       applyState(r.state);
-      setTimeout(() => { lot.revealing = false; for (const b of boxes) { b.classList.remove('picked', 'faded'); b.querySelector('.prize').replaceChildren(); } $('vaultHint').textContent = ''; renderLottery(); }, 2600);
+      playReveal(r.tier, () => {
+        // after the show: every box opens and shows what it held
+        for (let k = 0; k < boxes.length; k++) { const b = boxes[k]; b.classList.add('open', 't-' + lay[k]); b.classList.toggle('faded', k !== i); b.querySelector('.prize').replaceChildren(LotteryArt.gem(lay[k], 26)); }
+        $('vaultHint').textContent = tr('lotGot', { t: tr('tier_' + r.tier) });
+        setTimeout(() => { lot.revealing = false; for (const b of boxes) { b.className = 'vbox'; b.querySelector('.prize').replaceChildren(); } $('vaultHint').textContent = ''; renderLottery(); }, 2600);
+      });
     } catch (e) { lot.busy = false; lotMsg('err', errText(e)); refreshState(); }
   }
   function openLotModal(title, bodyNodes) {
@@ -506,10 +544,17 @@
   }
   function renderWithdrawals() {
     const box = $('wdList'); box.replaceChildren();
-    S.withdrawals.forEach((w) => {
+    const all = S.withdrawals; const shown = all.slice(0, 3);
+    const line = (w) => {
       const row = el('div', 'wd-row'); row.append(el('span', '', (w.gift_name ? w.gift_name + ' · ' : '') + fmt(w.amount) + ' ⭐ · ' + new Date(w.created_at).toLocaleDateString(lang)), el('span', 'st-' + w.status, tr('st_' + w.status)));
-      box.append(row);
-    });
+      return row;
+    };
+    shown.forEach((w) => box.append(line(w)));
+    if (all.length > shown.length) {
+      const more = el('button', 'wd-more', tr('showAll') + ' (' + all.length + ')'); more.type = 'button';
+      more.addEventListener('click', () => { box.replaceChildren(); all.forEach((w) => box.append(line(w))); box.classList.add('wd-scroll'); });
+      box.append(more);
+    }
   }
   // gift payout: the user picks the Telegram gift; its price becomes the amount
   let giftList = null;

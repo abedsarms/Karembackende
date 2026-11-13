@@ -130,12 +130,19 @@
   }
   // the purple gift box (SVG string, no inline style attributes: the CSP forbids them)
   function boxSVG(id) {
-    return `<svg viewBox="0 0 100 112" aria-hidden="true"><defs><linearGradient id="gb${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#3b1d8a"/></linearGradient><linearGradient id="gl${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c4b5fd"/><stop offset="1" stop-color="#6d3fd0"/></linearGradient><linearGradient id="gr${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff3a8"/><stop offset="1" stop-color="#d97706"/></linearGradient><filter id="gg${id}"><feGaussianBlur stdDeviation="5"/></filter></defs><ellipse cx="50" cy="104" rx="34" ry="5" fill="rgba(0,0,0,.55)"/><circle cx="50" cy="62" r="40" fill="rgba(168,85,247,.55)" filter="url(#gg${id})"/><rect x="12" y="50" width="76" height="52" rx="7" fill="url(#gb${id})"/><rect x="7" y="36" width="86" height="19" rx="6" fill="url(#gl${id})"/><rect x="43" y="36" width="14" height="66" fill="url(#gr${id})"/><path d="M50 36 C28 8 12 24 30 34 C38 38 46 37 50 36Z M50 36 C72 8 88 24 70 34 C62 38 54 37 50 36Z" fill="url(#gr${id})" stroke="#b45309" stroke-width="1.2"/><circle cx="50" cy="35" r="6" fill="#fde047" stroke="#b45309" stroke-width="1"/><path d="M16 54 L30 54 L20 98 L16 98Z" fill="rgba(255,255,255,.18)"/></svg>`;
+    return `<svg viewBox="0 0 100 112" aria-hidden="true"><defs><linearGradient id="gb${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#3b1d8a"/></linearGradient><linearGradient id="gl${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c4b5fd"/><stop offset="1" stop-color="#6d3fd0"/></linearGradient><linearGradient id="gr${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff3a8"/><stop offset="1" stop-color="#d97706"/></linearGradient><linearGradient id="gm${id}" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="currentColor" stop-opacity=".9"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient><filter id="gg${id}"><feGaussianBlur stdDeviation="5"/></filter></defs><ellipse cx="50" cy="104" rx="34" ry="5" fill="rgba(0,0,0,.55)"/><circle class="halo" cx="50" cy="62" r="40" fill="rgba(168,85,247,.55)" filter="url(#gg${id})"/><polygon class="beam" points="14,52 86,52 124,-160 -24,-160" fill="url(#gm${id})"/><rect x="12" y="50" width="76" height="52" rx="7" fill="url(#gb${id})"/><rect class="rim" x="14" y="50" width="72" height="8" rx="3" fill="currentColor"/><rect x="43" y="52" width="14" height="50" fill="url(#gr${id})"/><path d="M16 54 L30 54 L20 98 L16 98Z" fill="rgba(255,255,255,.18)"/><g class="lid"><rect x="7" y="36" width="86" height="19" rx="6" fill="url(#gl${id})"/><rect x="43" y="36" width="14" height="19" fill="url(#gr${id})"/><path d="M50 36 C28 8 12 24 30 34 C38 38 46 37 50 36Z M50 36 C72 8 88 24 70 34 C62 38 54 37 50 36Z" fill="url(#gr${id})" stroke="#b45309" stroke-width="1.2"/><circle cx="50" cy="35" r="6" fill="#fde047" stroke="#b45309" stroke-width="1"/></g></svg>`;
+  }
+  // one jigsaw piece of the tier ticket (the thing that pops out of the box)
+  function pieceCanvas(tier, w, h) {
+    const T = TI[tier], full = ticketCanvas(tier, 9, 240, 140, 9), sw = Math.round(full.width / 3.2), sh = Math.round(full.height / 2.4);
+    const cv = document.createElement('canvas'); cv.width = w * 2; cv.height = h * 2; cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    const c = cv.getContext('2d'); c.drawImage(full, full.width * 0.34, full.height * 0.3, sw, sh, 0, 0, cv.width, cv.height);
+    c.lineWidth = 8; c.strokeStyle = T.c; c.strokeRect(4, 4, cv.width - 8, cv.height - 8); return cv;
   }
   // a tier gem used in the "which piece did you get" reveal
   function gem(tier, size) {
     const T = TI[tier], S = 3, W = size * S, cv = document.createElement('canvas'); cv.width = cv.height = W; cv.style.width = cv.style.height = size + 'px'; const c = cv.getContext('2d');
     c.save(); c.shadowColor = T.c; c.shadowBlur = W * 0.14; embStar(c, W / 2, W / 2, W * 0.42, T, Math.max(1.4, W * 0.02)); c.restore(); return cv;
   }
-  window.LotteryArt = { ticketCanvas, mini, coin, boxSVG, gem, TI };
+  window.LotteryArt = { ticketCanvas, mini, coin, boxSVG, pieceCanvas, gem, TI };
 })();

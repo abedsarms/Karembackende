@@ -185,9 +185,9 @@ window.I18N = {
 
 /* coins + lucky boxes */
 Object.assign(window.I18N.en, {
-    navLottery: 'Boxes', coinsUnit: '🪙', claimedCoins: '✅ Reward claimed (+{n} 🪙)', claimedHalfCoins: '✅ Half reward claimed (+{n} 🪙) — you did not click the ad.', coinTag: 'Coins',
+    navLottery: 'Boxes', showAll: 'Show all', coinsUnit: '🪙', claimedCoins: '✅ Reward claimed (+{n} 🪙)', claimedHalfCoins: '✅ Half reward claimed (+{n} 🪙) — you did not click the ad.', coinTag: 'Coins',
     wonPendingCoins: '🎉 You won {n} 🪙! Watch a short ad to receive it.', spinClaimAdCoins: '📺 Watch ad to claim {n} 🪙', spinClaimGoCoins: '✅ Claim {n} 🪙', wonCoins: '🎉 Congratulations! You won {n} 🪙!',
-    lotTitle: '🎁 Lucky Boxes', lotEnds: '⏳ Event ends in', lotLocked: '🔒 Pay to open the boxes', lotPick: 'Pick one of the three boxes · all are identical',
+    lotTitle: '🎁 Lucky Boxes', lotEnds: '⏳ Event ends in', lotLocked: '🔒 Pay to open the boxes', lotPick: 'Pick one of the nine boxes · all are identical', lotTap: 'Tap to continue',
     lotPrizes: 'Prizes (up to): 🥇 **{g} ⭐** · 🥈 **{s} ⭐** · 🥉 **{b} ⭐** — one winner per ticket type', lotUnlock: 'Open', lotPieces: '{a} of {b} pieces · {p}%', lotTickets: '{n} tickets',
     lotConvert: '🔄 Convert pieces', lotLast: '🏆 Last result', lotNote: 'Prizes are drawn automatically when the event ends. Winning is not guaranteed — play only for fun.',
     tier_gold: 'Gold', tier_silver: 'Silver', tier_bronze: 'Bronze', lotGot: 'You got a {t} piece!', lotConvertTitle: '🔄 Convert pieces', lotConvertRow: '{n} {a} pieces → 1 {b} piece', lotDoConvert: 'Convert', lotConverted: '✅ Converted: 1 {t} piece added.',
@@ -197,9 +197,9 @@ Object.assign(window.I18N.en, {
     e_ALL_CAPPED: '❌ You reached the ticket limit.', e_NOT_ENOUGH: '❌ Not enough pieces.', e_DISABLED: '❌ This feature is switched off.', e_FLAGGED: '❌ Not available for this account.', e_BAD_TIER: '❌ Invalid.',
 });
 Object.assign(window.I18N.fa, {
-    navLottery: 'جعبه‌ها', coinsUnit: '🪙', claimedCoins: '✅ پاداش دریافت شد (+{n} 🪙)', claimedHalfCoins: '✅ نصف پاداش دریافت شد (+{n} 🪙) — روی تبلیغ کلیک نکردید.', coinTag: 'سکه',
+    navLottery: 'جعبه‌ها', showAll: 'نمایش همه', coinsUnit: '🪙', claimedCoins: '✅ پاداش دریافت شد (+{n} 🪙)', claimedHalfCoins: '✅ نصف پاداش دریافت شد (+{n} 🪙) — روی تبلیغ کلیک نکردید.', coinTag: 'سکه',
     wonPendingCoins: '🎉 برنده‌ی {n} 🪙 شدید! برای دریافت یک تبلیغ کوتاه ببینید.', spinClaimAdCoins: '📺 دیدن تبلیغ و دریافت {n} 🪙', spinClaimGoCoins: '✅ دریافت {n} 🪙', wonCoins: '🎉 تبریک! {n} 🪙 برنده شدید!',
-    lotTitle: '🎁 جعبه‌های شانس', lotEnds: '⏳ پایان رویداد', lotLocked: '🔒 برای باز کردن جعبه‌ها پرداخت کنید', lotPick: 'یکی از سه جعبه را انتخاب کن · هر سه یکسان‌اند',
+    lotTitle: '🎁 جعبه‌های شانس', lotEnds: '⏳ پایان رویداد', lotLocked: '🔒 برای باز کردن جعبه‌ها پرداخت کنید', lotPick: 'یکی از نه جعبه را انتخاب کن · همه یکسان‌اند', lotTap: 'برای ادامه لمس کنید',
     lotPrizes: 'جایزه‌ها (تا سقف): 🥇 **{g} ⭐** · 🥈 **{s} ⭐** · 🥉 **{b} ⭐** — برای هر نوع بلیط یک برنده', lotUnlock: 'باز کردن', lotPieces: '{a} از {b} تکه · {p}٪', lotTickets: '{n} بلیط',
     lotConvert: '🔄 تبدیل تکه‌ها', lotLast: '🏆 نتیجه‌ی دوره‌ی قبل', lotNote: 'جایزه‌ها پس از پایان رویداد به‌صورت خودکار قرعه‌کشی می‌شوند. برنده‌شدن تضمینی نیست — فقط برای سرگرمی.',
     tier_gold: 'طلایی', tier_silver: 'نقره‌ای', tier_bronze: 'برنزی', lotGot: 'یک تکه‌ی {t} گرفتی!', lotConvertTitle: '🔄 تبدیل تکه‌ها', lotConvertRow: '{n} تکه‌ی {a} ← ۱ تکه‌ی {b}', lotDoConvert: 'تبدیل', lotConverted: '✅ تبدیل شد: یک تکه‌ی {t} اضافه شد.',
@@ -209,9 +209,9 @@ Object.assign(window.I18N.fa, {
     e_ALL_CAPPED: '❌ به سقف تعداد بلیط رسیدید.', e_NOT_ENOUGH: '❌ تکه‌ی کافی ندارید.', e_DISABLED: '❌ این بخش فعلاً غیرفعال است.', e_FLAGGED: '❌ برای این حساب در دسترس نیست.', e_BAD_TIER: '❌ نامعتبر.',
 });
 Object.assign(window.I18N.ar, {
-    navLottery: 'الصناديق', coinsUnit: '🪙', claimedCoins: '✅ تم استلام المكافأة (+{n} 🪙)', claimedHalfCoins: '✅ تم استلام نصف المكافأة (+{n} 🪙) — لم تضغط على الإعلان.', coinTag: 'عملات',
+    navLottery: 'الصناديق', showAll: 'عرض الكل', coinsUnit: '🪙', claimedCoins: '✅ تم استلام المكافأة (+{n} 🪙)', claimedHalfCoins: '✅ تم استلام نصف المكافأة (+{n} 🪙) — لم تضغط على الإعلان.', coinTag: 'عملات',
     wonPendingCoins: '🎉 ربحت {n} 🪙! شاهد إعلانًا قصيرًا لاستلامها.', spinClaimAdCoins: '📺 شاهد الإعلان لاستلام {n} 🪙', spinClaimGoCoins: '✅ استلام {n} 🪙', wonCoins: '🎉 مبروك! ربحت {n} 🪙!',
-    lotTitle: '🎁 صناديق الحظ', lotEnds: '⏳ ينتهي الحدث خلال', lotLocked: '🔒 ادفع لفتح الصناديق', lotPick: 'اختر أحد الصناديق الثلاثة · كلها متطابقة',
+    lotTitle: '🎁 صناديق الحظ', lotEnds: '⏳ ينتهي الحدث خلال', lotLocked: '🔒 ادفع لفتح الصناديق', lotPick: 'اختر أحد الصناديق التسعة · كلها متطابقة', lotTap: 'المس للمتابعة',
     lotPrizes: 'الجوائز (حتى): 🥇 **{g} ⭐** · 🥈 **{s} ⭐** · 🥉 **{b} ⭐** — فائز واحد لكل نوع تذكرة', lotUnlock: 'فتح', lotPieces: '{a} من {b} قطع · {p}٪', lotTickets: '{n} تذاكر',
     lotConvert: '🔄 تحويل القطع', lotLast: '🏆 النتيجة السابقة', lotNote: 'تُسحب الجوائز تلقائيًا عند انتهاء الحدث. الفوز غير مضمون — العب للمتعة فقط.',
     tier_gold: 'ذهبية', tier_silver: 'فضية', tier_bronze: 'برونزية', lotGot: 'حصلت على قطعة {t}!', lotConvertTitle: '🔄 تحويل القطع', lotConvertRow: '{n} قطع {a} ← قطعة {b} واحدة', lotDoConvert: 'تحويل', lotConverted: '✅ تم التحويل: أُضيفت قطعة {t}.',
@@ -221,9 +221,9 @@ Object.assign(window.I18N.ar, {
     e_ALL_CAPPED: '❌ بلغت حد التذاكر.', e_NOT_ENOUGH: '❌ قطع غير كافية.', e_DISABLED: '❌ هذه الميزة متوقفة.', e_FLAGGED: '❌ غير متاح لهذا الحساب.', e_BAD_TIER: '❌ غير صالح.',
 });
 Object.assign(window.I18N.ru, {
-    navLottery: 'Боксы', coinsUnit: '🪙', claimedCoins: '✅ Награда получена (+{n} 🪙)', claimedHalfCoins: '✅ Получена половина награды (+{n} 🪙) — вы не нажали на рекламу.', coinTag: 'Монеты',
+    navLottery: 'Боксы', showAll: 'Показать все', coinsUnit: '🪙', claimedCoins: '✅ Награда получена (+{n} 🪙)', claimedHalfCoins: '✅ Получена половина награды (+{n} 🪙) — вы не нажали на рекламу.', coinTag: 'Монеты',
     wonPendingCoins: '🎉 Вы выиграли {n} 🪙! Посмотрите короткую рекламу, чтобы получить.', spinClaimAdCoins: '📺 Смотреть рекламу и получить {n} 🪙', spinClaimGoCoins: '✅ Получить {n} 🪙', wonCoins: '🎉 Поздравляем! Вы выиграли {n} 🪙!',
-    lotTitle: '🎁 Счастливые боксы', lotEnds: '⏳ До конца события', lotLocked: '🔒 Заплатите, чтобы открыть боксы', lotPick: 'Выберите один из трёх боксов · все одинаковые',
+    lotTitle: '🎁 Счастливые боксы', lotEnds: '⏳ До конца события', lotLocked: '🔒 Заплатите, чтобы открыть боксы', lotPick: 'Выберите один из девяти боксов · все одинаковые', lotTap: 'Нажмите, чтобы продолжить',
     lotPrizes: 'Призы (до): 🥇 **{g} ⭐** · 🥈 **{s} ⭐** · 🥉 **{b} ⭐** — один победитель на тип билета', lotUnlock: 'Открыть', lotPieces: '{a} из {b} частей · {p}%', lotTickets: 'Билетов: {n}',
     lotConvert: '🔄 Обмен частей', lotLast: '🏆 Прошлый результат', lotNote: 'Призы разыгрываются автоматически по окончании события. Выигрыш не гарантирован — играйте для удовольствия.',
     tier_gold: 'Золотой', tier_silver: 'Серебряный', tier_bronze: 'Бронзовый', lotGot: 'Вы получили часть: {t}!', lotConvertTitle: '🔄 Обмен частей', lotConvertRow: '{n} частей ({a}) → 1 часть ({b})', lotDoConvert: 'Обменять', lotConverted: '✅ Обмен выполнен: добавлена часть {t}.',
